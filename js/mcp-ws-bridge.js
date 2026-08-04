@@ -3,13 +3,14 @@
  *
  * In-panel WebSocket client for the InDesign MCP bridge.
  *
- * The CLI agent runtime (agent-runtime.js) spawns an ephemeral copy of the
- * installed adobe-indesign-mcp server for the duration of each turn. That
- * server opens a WebSocket bridge at ws://127.0.0.1:8120 and expects an
- * InDesign-side client to attach, execute the ExtendScript it sends, and
- * report the result back. This module IS that client — it runs inside the
- * CEP panel (which already has CSInterface + Node access) so no separate
- * UXP plugin install/connect step is required.
+ * init() (below) asks agent-runtime.js's startPersistentServer() to bring up
+ * (or confirm already-running) a single long-lived adobe-indesign-mcp server
+ * as soon as the panel loads — not spawned per CLI turn, and not torn down
+ * between turns. That server opens a WebSocket bridge at ws://127.0.0.1:8120
+ * and expects an InDesign-side client to attach, execute the ExtendScript it
+ * sends, and report the result back. This module IS that client — it runs
+ * inside the CEP panel (which already has CSInterface + Node access) so no
+ * separate UXP plugin install/connect step is required.
  *
  * Protocol (matches adobe-indesign-mcp's BridgeServer):
  *   server -> client: { type: 'connected', version }        (ignored)
@@ -17,10 +18,10 @@
  *   client -> server: { id, type: 'success', result }
  *   client -> server: { id, type: 'error', error }
  *
- * The server is short-lived and only exists while a CLI agent turn is
- * running, so this client just keeps retrying the connection forever at a
- * low fixed interval — cheap while idle, and ready the moment a turn spawns
- * a fresh server instance.
+ * The server is meant to stay up for the panel's whole lifetime, so a
+ * disconnect here is a transient hiccup (server restart, brief crash), not
+ * the expected idle state — this client just keeps retrying the connection
+ * forever at a low fixed interval until it reattaches.
  */
 
 (function () {
@@ -53,7 +54,7 @@
         if (wrap) {
             wrap.title = isConnected
                 ? 'Connected to the InDesign MCP bridge (ws://127.0.0.1:8120).'
-                : 'Waiting for an InDesign MCP server to start (spawned automatically when you send a message in Agent mode).';
+                : 'Connecting to the IntrixAI InDesign MCP server — starts automatically when the panel opens.';
         }
     }
 
@@ -97,14 +98,9 @@
         };
 
         ws.onclose = function () {
-            var wasConnected = isConnected;
             isConnected = false;
             ws = null;
-            updateStatusUI('warn', 'MCP: Waiting for agent turn…');
-            if (wasConnected) {
-                // The ephemeral server for this turn exited normally; keep polling
-                // so the next turn's server is picked up automatically.
-            }
+            updateStatusUI('warn', 'MCP: Reconnecting…');
             scheduleReconnect();
         };
 
@@ -140,8 +136,20 @@
     }
 
     function init() {
-        updateStatusUI('warn', 'MCP: Waiting for agent turn…');
+        updateStatusUI('warn', 'MCP: Starting…');
+        // Start reconnect polling immediately — cheap while idle — rather than
+        // waiting on startPersistentServer() first, in case that call is slow
+        // (cold start) or fails outright (e.g. Node unavailable in this CEP
+        // build). Either way this WS client just keeps trying until something
+        // is listening on 8120.
         connect();
+
+        if (typeof IntrixAgentRuntime !== 'undefined' && IntrixAgentRuntime.startPersistentServer) {
+            IntrixAgentRuntime.startPersistentServer().catch(function (error) {
+                updateStatusUI('warn', 'MCP: Waiting to start…');
+                console.error('[IntrixAI MCP] Failed to start persistent server:', error && error.message);
+            });
+        }
     }
 
     if (document.readyState === 'loading') {

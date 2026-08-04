@@ -90,8 +90,8 @@ if [ -f "$USER_INTRIX_DIR/CSXS/manifest.xml" ]; then
     echo "  Window > Extensions > IntrixAI"
     echo ""
     echo "CLI Agent Mode is ready to go — no separate plugin to load."
-    echo "The panel connects to the InDesign MCP bridge automatically"
-    echo "whenever a CLI agent turn is running."
+    echo "The panel starts a persistent InDesign MCP server and stays"
+    echo "connected to it as soon as it opens, not just during a turn."
     echo "========================================"
 else
     echo "❌ ERROR: Installation failed."

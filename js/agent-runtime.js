@@ -49,6 +49,33 @@ const IntrixAgentRuntime = (() => {
         return CLI_PROVIDERS.indexOf(provider) !== -1;
     }
 
+    /**
+     * Kills the CLI process AND the InDesign MCP server it spawned as a
+     * grandchild. A plain child.kill() only signals the CLI itself — the
+     * launch-indesign-mcp.mjs -> dist/index.js chain underneath it is left
+     * running as an orphan holding the bridge port. That orphan then races
+     * the *next* turn's freeStalePort() cleanup: if it still has genuinely
+     * in-flight bridge calls when it gets reaped, those calls are rejected
+     * with "Execution cancelled", which is what a CLI agent reports back as
+     * "MCP bridge calls were cancelled before returning any document data."
+     * Spawning the CLI as its own process group (POSIX) / process tree
+     * (Windows) lets us tear down the whole tree in one shot instead.
+     */
+    function killTree(cp, child, signal) {
+        if (!child || child.killed) return;
+        if (process.platform === 'win32') {
+            try {
+                cp.spawn('taskkill', ['/pid', String(child.pid), '/t', '/f']);
+            } catch (e) { try { child.kill(signal); } catch (e2) { /* already gone */ } }
+            return;
+        }
+        try {
+            process.kill(-child.pid, signal);
+        } catch (e) {
+            try { child.kill(signal); } catch (e2) { /* already gone */ }
+        }
+    }
+
     function getExtensionRoot(pathModule) {
         try {
             if (typeof window !== 'undefined' && window.location && window.location.pathname) {
@@ -89,6 +116,39 @@ const IntrixAgentRuntime = (() => {
         throw new Error('Node.js 18+ is required to launch the InDesign MCP server.');
     }
 
+    /**
+     * Ensures the persistent InDesign MCP daemon (scripts/mcp-daemon.mjs) is
+     * up and healthy, starting it only if it isn't. Idempotent and cheap on
+     * the common path (already running, just a fast health check) — safe to
+     * call at the start of every turn even though the panel-load bootstrap
+     * (js/mcp-ws-bridge.js) already calls it once when the panel opens.
+     * Uses async spawn, not spawnSync: this runs in the CEP panel's own
+     * Node/Chromium process, and a blocking synchronous spawn would freeze
+     * the UI for the seconds a cold start can take.
+     */
+    function ensureMcpDaemon(cp, path, root, nodeBinary) {
+        return new Promise(function (resolve, reject) {
+            const script = path.join(root, 'scripts', 'mcp-daemon.mjs');
+            const child = cp.spawn(nodeBinary, [script], { stdio: ['ignore', 'pipe', 'pipe'] });
+            let stdout = '';
+            let stderr = '';
+            child.stdout.on('data', function (chunk) { stdout += chunk.toString(); });
+            child.stderr.on('data', function (chunk) { stderr += chunk.toString(); });
+            child.on('error', reject);
+            child.on('close', function (code) {
+                if (code !== 0) {
+                    reject(new Error('IntrixAI MCP daemon failed to start: ' + (stderr || 'exit code ' + code).trim()));
+                    return;
+                }
+                try {
+                    resolve(JSON.parse(stdout.trim()));
+                } catch (e) {
+                    reject(new Error('IntrixAI MCP daemon returned an unreadable response: ' + stdout.trim()));
+                }
+            });
+        });
+    }
+
     function buildConversationPrompt(messages) {
         const recent = messages.slice(-12).map(function (message) {
             const role = message.role === 'assistant' ? 'AGENT' : 'USER';
@@ -105,25 +165,26 @@ const IntrixAgentRuntime = (() => {
         const path = runtime.path;
         const fs = runtime.fs;
         const root = runtime.root;
-        const nodeBinary = runtime.nodeBinary;
-        const launcher = path.join(root, 'scripts', 'launch-indesign-mcp.mjs');
+        const mcpInfo = runtime.mcpInfo;
+        const mcpUrl = 'http://' + mcpInfo.host + ':' + mcpInfo.port + '/mcp';
         const tempRoot = path.join(runtime.os.tmpdir(), 'intrixai-agent-runtime');
         fs.mkdirSync(tempRoot, { recursive: true });
 
-        if (!fs.existsSync(launcher)) {
-            throw new Error('IntrixAI MCP launcher is missing: ' + launcher);
-        }
-
         if (provider === 'claude-cli') {
+            // Points at the persistent daemon's HTTP endpoint (js/mcp-ws-bridge.js
+            // keeps it running for the panel's lifetime) instead of spawning a
+            // fresh stdio MCP server per turn — every turn, from every provider,
+            // now shares the one live bridge connection to InDesign.
             const configPath = path.join(tempRoot, 'claude-mcp-' + Date.now() + '.json');
             fs.writeFileSync(configPath, JSON.stringify({
                 mcpServers: {
                     'intrixai-indesign': {
-                        command: nodeBinary,
-                        args: [launcher]
+                        type: 'http',
+                        url: mcpUrl,
+                        headers: { Authorization: 'Bearer ' + mcpInfo.token }
                     }
                 }
-            }), 'utf8');
+            }), { encoding: 'utf8', mode: 0o600 });
             return {
                 args: [
                     '-p',
@@ -141,17 +202,28 @@ const IntrixAgentRuntime = (() => {
 
         if (provider === 'codex-cli') {
             const outputPath = path.join(tempRoot, 'codex-result-' + Date.now() + '.txt');
-            const mcpArgs = '[' + [launcher].map(tomlString).join(',') + ']';
             return {
+                // Codex silently auto-declines every MCP tool call ("user cancelled
+                // MCP tool call") under --sandbox read-only or workspace-write when
+                // run headlessly via `exec` — there's no TTY for it to actually ask
+                // approval, so the InDesign bridge calls never complete, regardless
+                // of stdio vs HTTP transport (verified both). Only
+                // danger-full-access lets non-interactive MCP calls go through.
+                // --disable shell_tool removes Codex's own shell access so the
+                // agent is left with only the intrixai-indesign MCP tool, matching
+                // the '--tools ""' lockdown used for claude-cli above. The bearer
+                // token is passed via env (INTRIXAI_MCP_TOKEN, set by run() below),
+                // never as a literal in argv where `ps` could see it.
                 args: [
                     'exec',
                     '--ignore-user-config',
                     '--skip-git-repo-check',
                     '--ephemeral',
-                    '--sandbox', 'read-only',
+                    '--sandbox', 'danger-full-access',
+                    '--disable', 'shell_tool',
                     '-c', 'approval_policy="never"',
-                    '-c', 'mcp_servers.intrixai_indesign.command=' + tomlString(nodeBinary),
-                    '-c', 'mcp_servers.intrixai_indesign.args=' + mcpArgs,
+                    '-c', 'mcp_servers.intrixai_indesign.url=' + tomlString(mcpUrl),
+                    '-c', 'mcp_servers.intrixai_indesign.bearer_token_env_var="INTRIXAI_MCP_TOKEN"',
                     '--output-last-message', outputPath,
                     '-'
                 ],
@@ -162,6 +234,12 @@ const IntrixAgentRuntime = (() => {
         }
 
         if (provider === 'gemini-cli') {
+            // Unchanged: still resolves intrixai-indesign from the project's
+            // committed .gemini/settings.json (stdio, via launch-indesign-mcp.mjs)
+            // rather than the persistent HTTP daemon — gemini-cli has no inline
+            // --mcp-config equivalent to layer a per-run bearer token onto a
+            // git-tracked file, and as of this writing gemini-cli itself is
+            // rejecting requests for this account tier independent of MCP wiring.
             return {
                 args: [
                     '--prompt', prompt,
@@ -208,13 +286,18 @@ const IntrixAgentRuntime = (() => {
         return raw;
     }
 
-    function run(provider, messages, signal) {
+    async function run(provider, messages, signal) {
         if (!isCliProvider(provider)) {
-            return Promise.reject(new Error('Not a CLI agent provider: ' + provider));
+            throw new Error('Not a CLI agent provider: ' + provider);
         }
         const req = getNodeRequire();
         if (!req) {
-            return Promise.reject(new Error('Node child_process is unavailable in the CEP panel.'));
+            throw new Error('Node child_process is unavailable in the CEP panel.');
+        }
+        if (signal && signal.aborted) {
+            const error = new Error('Agent run stopped.');
+            error.name = 'AbortError';
+            throw error;
         }
 
         const cp = req('child_process');
@@ -225,20 +308,24 @@ const IntrixAgentRuntime = (() => {
         const prompt = buildConversationPrompt(messages);
         let binary;
         let nodeBinary;
+        let mcpInfo;
         let invocation;
 
         try {
             binary = resolveBinary(fs, provider);
             nodeBinary = resolveNodeBinary(fs);
+            // Idempotent: near-instant if js/mcp-ws-bridge.js's panel-load
+            // bootstrap already has the daemon up, otherwise starts it now.
+            mcpInfo = await ensureMcpDaemon(cp, path, root, nodeBinary);
             invocation = createInvocation(provider, prompt, {
                 fs: fs,
                 path: path,
                 os: os,
                 root: root,
-                nodeBinary: nodeBinary
+                mcpInfo: mcpInfo
             });
         } catch (error) {
-            return Promise.reject(error);
+            throw error;
         }
 
         return new Promise(function (resolve, reject) {
@@ -255,9 +342,11 @@ const IntrixAgentRuntime = (() => {
                         '/usr/bin',
                         '/bin',
                         process.env.PATH || ''
-                    ].join(':')
+                    ].join(':'),
+                    INTRIXAI_MCP_TOKEN: mcpInfo.token
                 }),
-                stdio: ['pipe', 'pipe', 'pipe']
+                stdio: ['pipe', 'pipe', 'pipe'],
+                detached: process.platform !== 'win32'
             });
 
             function cleanup() {
@@ -276,14 +365,14 @@ const IntrixAgentRuntime = (() => {
             }
 
             function abortChild() {
-                if (!child.killed) child.kill('SIGTERM');
+                killTree(cp, child, 'SIGTERM');
                 const error = new Error('Agent run stopped.');
                 error.name = 'AbortError';
                 finish(error);
             }
 
             const timeoutId = setTimeout(function () {
-                if (!child.killed) child.kill('SIGTERM');
+                killTree(cp, child, 'SIGTERM');
                 finish(new Error('CLI agent timed out after 5 minutes.'));
             }, AGENT_TIMEOUT_MS);
 
@@ -298,7 +387,7 @@ const IntrixAgentRuntime = (() => {
             child.stdout.on('data', function (chunk) {
                 stdout += chunk.toString();
                 if (stdout.length > MAX_OUTPUT_BYTES) {
-                    child.kill('SIGTERM');
+                    killTree(cp, child, 'SIGTERM');
                     finish(new Error('CLI agent output exceeded 10 MB.'));
                 }
             });
@@ -354,5 +443,35 @@ const IntrixAgentRuntime = (() => {
         }
     }
 
-    return { isCliProvider: isCliProvider, run: run, check: check };
+    /**
+     * Public entry point for starting the persistent MCP daemon proactively,
+     * independent of any CLI agent turn — called once when the panel loads
+     * (see js/mcp-ws-bridge.js) so the InDesign bridge is already live by
+     * the time the user sends their first message, instead of only coming
+     * up on-demand mid-turn.
+     */
+    function startPersistentServer() {
+        const req = getNodeRequire();
+        if (!req) {
+            return Promise.reject(new Error('Node child_process is unavailable in the CEP panel.'));
+        }
+        const cp = req('child_process');
+        const fs = req('fs');
+        const path = req('path');
+        const root = getExtensionRoot(path);
+        let nodeBinary;
+        try {
+            nodeBinary = resolveNodeBinary(fs);
+        } catch (error) {
+            return Promise.reject(error);
+        }
+        return ensureMcpDaemon(cp, path, root, nodeBinary);
+    }
+
+    return {
+        isCliProvider: isCliProvider,
+        run: run,
+        check: check,
+        startPersistentServer: startPersistentServer
+    };
 })();
