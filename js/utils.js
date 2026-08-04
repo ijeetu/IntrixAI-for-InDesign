@@ -298,32 +298,6 @@ const AideUtils = (() => {
             }
         }
 
-        // Visible page text extraction
-        const pageTextChunks = [];
-        const textStreamRegex = /BT([\s\S]*?)ET/g;
-        let textMatch;
-        while ((textMatch = textStreamRegex.exec(latin1)) !== null) {
-            const streamBlock = textMatch[1];
-            const tjRegex = /\(([^\)]*)\)\s*Tj|\[([^\]]*)\]\s*TJ/g;
-            let tjMatch;
-            let lineText = '';
-            while ((tjMatch = tjRegex.exec(streamBlock)) !== null) {
-                if (tjMatch[1]) {
-                    lineText += decodePdfString('(' + tjMatch[1] + ')');
-                } else if (tjMatch[2]) {
-                    const innerTj = tjMatch[2];
-                    const innerStrRegex = /\(([^\)]*)\)/g;
-                    let innerMatch;
-                    while ((innerMatch = innerStrRegex.exec(innerTj)) !== null) {
-                        lineText += decodePdfString('(' + innerMatch[1] + ')');
-                    }
-                }
-            }
-            if (lineText.trim()) {
-                pageTextChunks.push(lineText.trim());
-            }
-        }
-
         let summary = `PDF File: ${fileName}\n`;
         summary += `Total PDF Comments / Annotations Found: ${comments.length}\n\n`;
 
@@ -338,11 +312,6 @@ const AideUtils = (() => {
             });
         } else {
             summary += `No explicit annotation comments found in PDF objects (or scanned image PDF).\n\n`;
-        }
-
-        if (pageTextChunks.length > 0) {
-            summary += `═══ EXTRACTED PDF TEXT PREVIEW ═══\n`;
-            summary += pageTextChunks.slice(0, 100).join('\n') + `\n`;
         }
 
         return summary;
@@ -393,5 +362,44 @@ const AideUtils = (() => {
         });
     }
 
-    return { stripCodeFences, validateSyntax, formatDate, uid, escapeHtml, generateLineNumbersHtml, readTextFile, parsePdfCommentsAndText };
+    /**
+     * Render Markdown string to safe, beautiful HTML.
+     */
+    function renderMarkdown(md) {
+        if (!md) return '';
+        let html = escapeHtml(md);
+
+        // Headings
+        html = html.replace(/^### (.*$)/gim, '<h3 class="md-h3">$1</h3>');
+        html = html.replace(/^## (.*$)/gim, '<h2 class="md-h2">$1</h2>');
+        html = html.replace(/^# (.*$)/gim, '<h1 class="md-h1">$1</h1>');
+
+        // Bold & Italic
+        html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        html = html.replace(/__(.*?)__/g, '<strong>$1</strong>');
+
+        // Inline code
+        html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
+
+        // Blockquotes
+        html = html.replace(/^&gt;\s?(.*$)/gim, '<blockquote class="md-blockquote">$1</blockquote>');
+
+        // Unordered lists (- or *)
+        html = html.replace(/^[\s]*[-\*]\s+(.*$)/gim, '<li class="md-li">$1</li>');
+        html = html.replace(/(<li class="md-li">.*<\/li>\n?)+/g, '<ul class="md-ul">$&</ul>');
+
+        // Ordered lists (1., 2.)
+        html = html.replace(/^[\s]*\d+\.\s+(.*$)/gim, '<li class="md-oli">$1</li>');
+        html = html.replace(/(<li class="md-oli">.*<\/li>\n?)+/g, '<ol class="md-ol">$&</ol>');
+
+        // Paragraphs & Line breaks
+        html = html.replace(/\n\n/g, '</p><p class="md-p">');
+        html = html.replace(/\n/g, '<br>');
+
+        return '<div class="md-rendered"><p class="md-p">' + html + '</p></div>';
+    }
+
+    return { stripCodeFences, validateSyntax, formatDate, uid, escapeHtml, generateLineNumbersHtml, readTextFile, parsePdfCommentsAndText, renderMarkdown };
 })();

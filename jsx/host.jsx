@@ -489,6 +489,72 @@ function importPdfCommentsToActiveDoc(pdfPathStr) {
 }
 
 /**
+ * Mark imported PDF comments as RESOLVED so their highlight color turns green in InDesign.
+ * @param {Array} commentIds IDs returned by importPdfCommentsToActiveDoc.
+ * @param {string} pdfPathStr Original review PDF path.
+ * @param {number} documentId Document that received the imported comments.
+ * @returns {string} JSON string with the number of annotations marked as resolved.
+ */
+function markPdfCommentsResolved(commentIds, pdfPathStr, documentId) {
+    try {
+        if (!app.documents || app.documents.length === 0) {
+            return __fail("No document open in InDesign.");
+        }
+
+        var doc = null;
+        var requestedDocument = documentId !== undefined && documentId !== null && String(documentId) !== '';
+        var i;
+        if (requestedDocument) {
+            for (i = 0; i < app.documents.length; i++) {
+                if (String(app.documents[i].id) === String(documentId)) {
+                    doc = app.documents[i];
+                    break;
+                }
+            }
+        }
+        if (!doc) doc = app.activeDocument;
+
+        var idLookup = {};
+        var hasIds = false;
+        if (commentIds && commentIds.length) {
+            for (i = 0; i < commentIds.length; i++) {
+                idLookup[String(commentIds[i])] = true;
+                hasIds = true;
+            }
+        }
+
+        var updated = 0;
+        if (doc.pdfComments && doc.pdfComments.length > 0) {
+            for (i = 0; i < doc.pdfComments.length; i++) {
+                var comment = doc.pdfComments[i];
+                var shouldUpdate = !hasIds || !!idLookup[String(comment.id)];
+                if (shouldUpdate) {
+                    try {
+                        if (typeof CommentStatusEnum !== 'undefined' && CommentStatusEnum.RESOLVED) {
+                            comment.commentStatus = CommentStatusEnum.RESOLVED;
+                        } else if (typeof CommentStatusEnum !== 'undefined' && CommentStatusEnum.ACCEPTED) {
+                            comment.commentStatus = CommentStatusEnum.ACCEPTED;
+                        } else {
+                            comment.commentStatus = "Resolved";
+                        }
+                        updated++;
+                    } catch (eStatus) {
+                        try {
+                            comment.commentStatus = "Resolved";
+                            updated++;
+                        } catch (eStatusStr) {}
+                    }
+                }
+            }
+        }
+        doc.recompose();
+        return __ok({ count: updated });
+    } catch (e) {
+        return __fail("Error marking PDF comments resolved: " + e.message);
+    }
+}
+
+/**
  * Remove the native annotations created for one uploaded review PDF.
  * Called only after the requested document changes complete successfully.
  * IDs are preferred so comments from other PDFs are never touched; the source

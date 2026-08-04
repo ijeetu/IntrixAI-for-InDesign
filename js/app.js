@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
         attachedFile:       $id('attached-file'),
         attachedFileName:   $id('attached-file-name'),
         removeAttachment:   $id('remove-attachment'),
+        clearHighlightsBtn: $id('clear-highlights-btn'),
         scriptsSearch:      $id('scripts-search'),
         scriptsSearchClear: $id('scripts-search-clear'),
         scriptsList:        $id('scripts-list'),
@@ -464,10 +465,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
             removePendingPdfCleanup(code, attachment);
             attachment.pdfCommentsCleaned = true;
+            if (dom.clearHighlightsBtn) {
+                dom.clearHighlightsBtn.classList.add('hidden');
+            }
             AideModels.log('pdf_comments_cleaned', {
                 name: attachment.name,
                 removed: response.data.removed || 0
             });
+        });
+    }
+
+    let activePdfCleanupAttachment = null;
+
+    function markImportedPdfCommentsResolved(attachment) {
+        if (!attachment || attachment.type !== 'pdf' || !attachment.path || !csInterface) return;
+        activePdfCleanupAttachment = attachment;
+        const ids = attachment.importedPdfCommentIds || [];
+        const documentId = attachment.pdfCommentDocumentId == null ? null : attachment.pdfCommentDocumentId;
+        const fallbackPath = Array.isArray(attachment.importedPdfCommentIds) ? '' : attachment.path;
+        const script = `markPdfCommentsResolved(${JSON.stringify(ids)}, ${JSON.stringify(fallbackPath)}, ${JSON.stringify(documentId)})`;
+
+        evalScriptSafe(script, ({ success, result, error }) => {
+            const response = success ? parseHostJson(result) : null;
+            if (response && response.ok) {
+                attachment.pdfCommentsResolved = true;
+                if (dom.clearHighlightsBtn) {
+                    dom.clearHighlightsBtn.classList.remove('hidden');
+                }
+                AideModels.log('pdf_comments_resolved', {
+                    name: attachment.name,
+                    resolvedCount: response.data.count || 0
+                });
+            }
+        });
+    }
+
+    if (dom.clearHighlightsBtn) {
+        dom.clearHighlightsBtn.addEventListener('click', () => {
+            if (activePdfCleanupAttachment) {
+                cleanupImportedPdfComments(activePdfCleanupAttachment, null);
+                activePdfCleanupAttachment = null;
+            }
+            dom.clearHighlightsBtn.classList.add('hidden');
         });
     }
 
@@ -731,8 +770,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (update.type === 'done') {
                     if (attachmentSnapshot && attachmentSnapshot.type === 'pdf') {
                         if (update.agent) {
-                            // CLI agents edit the live document before reporting done.
-                            cleanupImportedPdfComments(attachmentSnapshot, null);
+                            // CLI agents mark comments as resolved (turning highlights GREEN)
+                            markImportedPdfCommentsResolved(attachmentSnapshot);
                         } else {
                             // Code providers are not done until their generated script runs.
                             // Keep the cleanup associated with that exact code for manual or
@@ -1004,7 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isError) {
                 offerAutoFix(message, opts.failedCode != null ? opts.failedCode : code, pdfCleanupAttachment);
             } else if (pdfCleanupAttachment) {
-                cleanupImportedPdfComments(pdfCleanupAttachment, code);
+                markImportedPdfCommentsResolved(pdfCleanupAttachment);
             }
         });
     }
