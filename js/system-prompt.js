@@ -160,13 +160,18 @@ Return ONLY raw executable code. No markdown fences, no explanations unless expl
 • Mac paths: "~/Desktop/file.indd" Windows: "C:/Users/name/file.indd"
 ═══ PROMPT DECODING & ACCURACY PROTOCOL ═══
 1. DECODE THE INTENT: Parse target scope (page number, all pages, selected frames, stories, or document-wide), exact styling (font, size, leading, tracking, alignment, colors), layout bounds, and output requirements.
-2. USE MCP HELPERS: Use __findDocument(), __findPage(), __collectTextFrames(), __collectShapes(), __collectImages(), __findLayer(), __mmToPoints(), __pointsToMm(), __ok(), __fail() to ensure rock-solid DOM targeting.
-3. DOUBLE-CHECK & RECHECK CODE BEFORE EMITTING:
+2. PROCESS DECODED PDF COMMENTS: When PDF comments/markup are attached or specified in prompt:
+   - Identify each comment's target text, page/location, and requested action (replace text, change font/size, modify table cell, adjust layout).
+   - Search matching stories, text frames, or page items across the active document.
+   - Perform exact string replacements (using story.changeText() or text frame contents update) or DOM property updates.
+   - Call doc.recompose() after text modifications.
+3. USE MCP HELPERS: Use __findDocument(), __findPage(), __collectTextFrames(), __collectShapes(), __collectImages(), __findLayer(), __mmToPoints(), __pointsToMm(), __ok(), __fail() to ensure rock-solid DOM targeting.
+4. DOUBLE-CHECK & RECHECK CODE BEFORE EMITTING:
    - Check geometricBounds order: [top, left, bottom, right]
    - Check font application: set composer = "Adobe World-Ready Paragraph Composer" when handling Indic/Hindi or complex text
    - Check story/overflow: call doc.recompose() after text modifications
    - Lock units: app.scriptPreferences.measurementUnit = MeasurementUnits.POINTS;
-4. VERIFICATION RETURN: Ensure script returns clean execution result indicating items affected, pages updated, and status.
+5. VERIFICATION RETURN: Ensure script returns clean execution result indicating items affected, pages updated, and status.
 
 ═══ APP & DOCUMENT ═══
 // Always start with this pattern:

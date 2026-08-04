@@ -417,6 +417,165 @@ function runGeneratedExtendScript(codeString) {
 }
 
 /**
+ * Import comments from a PDF file directly into the active InDesign document.
+ * @param {string} pdfPathStr Path to the PDF file.
+ * @returns {string} JSON string with ok status and comment count / details.
+ */
+function importPdfCommentsToActiveDoc(pdfPathStr) {
+    try {
+        if (!app.documents || app.documents.length === 0) {
+            return __fail("No active document open in InDesign.");
+        }
+        var doc = app.activeDocument;
+        var pdfPath = aideResolveUserPath(String(pdfPathStr || ''));
+        if (!pdfPath) return __fail("No PDF path provided.");
+
+        var pdfFile = new File(pdfPath);
+        if (!pdfFile.exists) return __fail("PDF file not found: " + pdfPath);
+
+        // Remember the comments that already belong to the document so the CEP
+        // panel can later remove only the annotations introduced by this upload.
+        // This preserves comments imported by the user from other review PDFs.
+        var existingCommentIds = {};
+        var beforeCount = 0;
+        var i;
+        if (doc.pdfComments) {
+            beforeCount = doc.pdfComments.length;
+            for (i = 0; i < beforeCount; i++) {
+                try {
+                    existingCommentIds[String(doc.pdfComments[i].id)] = true;
+                } catch (eExisting) { /* ignore an invalid comment specifier */ }
+            }
+        }
+
+        if (typeof doc.importPdfComments === 'function') {
+            doc.importPdfComments(pdfFile);
+        } else {
+            return __fail("InDesign version does not support importPdfComments API.");
+        }
+
+        var count = 0;
+        var commentList = [];
+        var importedCommentIds = [];
+        if (doc.pdfComments && doc.pdfComments.length > 0) {
+            var totalCount = doc.pdfComments.length;
+            for (i = 0; i < totalCount; i++) {
+                var c = doc.pdfComments[i];
+                var commentId = '';
+                try { commentId = String(c.id); } catch (eId) { /* ignore */ }
+                if (commentId && !existingCommentIds[commentId]) {
+                    importedCommentIds.push(Number(commentId));
+                    count++;
+                    commentList.push({
+                        id: Number(commentId),
+                        commentType: c.commentType ? String(c.commentType) : '',
+                        commentText: c.commentContent ? String(c.commentContent) : '',
+                        author: c.commentReviewer ? String(c.commentReviewer) : '',
+                        status: c.commentStatus ? String(c.commentStatus) : ''
+                    });
+                }
+            }
+        }
+        return __ok({
+            count: count,
+            comments: commentList,
+            importedCommentIds: importedCommentIds,
+            documentId: doc.id,
+            path: pdfFile.fsName
+        });
+    } catch (e) {
+        return __fail("Error importing PDF comments: " + e.message);
+    }
+}
+
+/**
+ * Remove the native annotations created for one uploaded review PDF.
+ * Called only after the requested document changes complete successfully.
+ * IDs are preferred so comments from other PDFs are never touched; the source
+ * path is a fallback for older InDesign versions/import results without IDs.
+ * @param {Array} commentIds IDs returned by importPdfCommentsToActiveDoc.
+ * @param {string} pdfPathStr Original review PDF path.
+ * @param {number} documentId Document that received the imported comments.
+ * @returns {string} JSON string with the number of annotations removed.
+ */
+function removeImportedPdfComments(commentIds, pdfPathStr, documentId) {
+    try {
+        if (!app.documents || app.documents.length === 0) {
+            return __fail("No document open in InDesign.");
+        }
+
+        var doc = null;
+        var requestedDocument = documentId !== undefined && documentId !== null && String(documentId) !== '';
+        var i;
+        if (requestedDocument) {
+            for (i = 0; i < app.documents.length; i++) {
+                if (String(app.documents[i].id) === String(documentId)) {
+                    doc = app.documents[i];
+                    break;
+                }
+            }
+        }
+        if (requestedDocument && !doc) {
+            return __fail("The document that received the PDF comments is no longer open.");
+        }
+        if (!doc) doc = app.activeDocument;
+
+        var idLookup = {};
+        var hasIds = false;
+        if (commentIds && commentIds.length) {
+            for (i = 0; i < commentIds.length; i++) {
+                idLookup[String(commentIds[i])] = true;
+                hasIds = true;
+            }
+        }
+
+        var expectedPath = '';
+        if (pdfPathStr) {
+            try {
+                expectedPath = String(new File(aideResolveUserPath(String(pdfPathStr))).fsName).toLowerCase();
+            } catch (eExpectedPath) {
+                expectedPath = String(pdfPathStr).toLowerCase();
+            }
+        }
+
+        var removed = 0;
+        var failed = 0;
+        if (doc.pdfComments) {
+            // Delete backwards because remove() immediately changes the collection.
+            for (i = doc.pdfComments.length - 1; i >= 0; i--) {
+                var comment = doc.pdfComments[i];
+                var shouldRemove = false;
+                if (hasIds) {
+                    try { shouldRemove = !!idLookup[String(comment.id)]; } catch (eCommentId) { /* ignore */ }
+                } else if (expectedPath) {
+                    var commentPath = '';
+                    try {
+                        commentPath = String(new File(String(comment.commentFilePath || '')).fsName).toLowerCase();
+                    } catch (eCommentPath) {
+                        try { commentPath = String(comment.commentFilePath || '').toLowerCase(); } catch (eRawPath) { /* ignore */ }
+                    }
+                    shouldRemove = commentPath === expectedPath;
+                }
+
+                if (shouldRemove) {
+                    try {
+                        comment.remove();
+                        removed++;
+                    } catch (eRemove) {
+                        failed++;
+                    }
+                }
+            }
+        }
+
+        try { doc.recompose(); } catch (eRecompose) { /* ignore */ }
+        return __ok({ removed: removed, failed: failed, documentId: doc.id });
+    } catch (e) {
+        return __fail("Error removing imported PDF comments: " + e.message);
+    }
+}
+
+/**
  * Save a script file to disk.
  * @param {string} folderPath The folder to save into.
  * @param {string} fileName The file name (without extension).

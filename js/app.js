@@ -93,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Current file attachment
     let currentAttachment = null;
+    const pendingPdfCleanupByCode = [];
 
     // Step 4: Cached auto-detected Scripts Panel path (empty = not found / not yet detected)
     let autoDetectedScriptsPanelPath = '';
@@ -386,6 +387,90 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ──────────────── File Attachment ────────────────
+    function parseHostJson(result) {
+        try { return JSON.parse(String(result || '')); }
+        catch (e) { return null; }
+    }
+
+    function importPdfAttachmentComments(attachment) {
+        if (!attachment || attachment.type !== 'pdf' || !attachment.path || !csInterface) return;
+
+        attachment.pdfCommentImportPending = true;
+        evalScriptSafe(`importPdfCommentsToActiveDoc(${JSON.stringify(attachment.path)})`, ({ success, result, error }) => {
+            const response = success ? parseHostJson(result) : null;
+            attachment.pdfCommentImportPending = false;
+            if (!response || !response.ok) {
+                console.warn('InDesign native PDF comments import failed:', error || (response && response.error) || result);
+                return;
+            }
+
+            attachment.importedPdfCommentIds = response.data.importedCommentIds || [];
+            attachment.pdfCommentDocumentId = response.data.documentId;
+            AideModels.log('pdf_comments_imported', {
+                name: attachment.name,
+                count: response.data.count || 0
+            });
+
+            if (attachment.cleanupPdfCommentsAfterImport) {
+                const pendingCode = attachment.cleanupPdfCommentsAfterImportCode || null;
+                attachment.cleanupPdfCommentsAfterImport = false;
+                attachment.cleanupPdfCommentsAfterImportCode = null;
+                cleanupImportedPdfComments(attachment, pendingCode);
+            }
+        });
+    }
+
+    function removePendingPdfCleanup(code, attachment) {
+        for (let i = pendingPdfCleanupByCode.length - 1; i >= 0; i--) {
+            const item = pendingPdfCleanupByCode[i];
+            if (item.attachment === attachment || (code && item.code === code)) {
+                pendingPdfCleanupByCode.splice(i, 1);
+            }
+        }
+    }
+
+    function findPendingPdfCleanup(code, triggerBtn) {
+        if (triggerBtn && triggerBtn._pdfCleanupAttachment) {
+            return triggerBtn._pdfCleanupAttachment;
+        }
+        for (let i = pendingPdfCleanupByCode.length - 1; i >= 0; i--) {
+            if (pendingPdfCleanupByCode[i].code === code) return pendingPdfCleanupByCode[i].attachment;
+        }
+        return null;
+    }
+
+    function cleanupImportedPdfComments(attachment, code) {
+        if (!attachment || attachment.type !== 'pdf' || !attachment.path || !csInterface) return;
+        if (attachment.pdfCommentImportPending) {
+            attachment.cleanupPdfCommentsAfterImport = true;
+            attachment.cleanupPdfCommentsAfterImportCode = code || null;
+            return;
+        }
+
+        const ids = attachment.importedPdfCommentIds || [];
+        const documentId = attachment.pdfCommentDocumentId == null ? null : attachment.pdfCommentDocumentId;
+        // Once an import result is available, even an empty ID list is
+        // authoritative. Supplying no fallback path in that case prevents an
+        // older comment from the same PDF from being deleted accidentally.
+        const fallbackPath = Array.isArray(attachment.importedPdfCommentIds) ? '' : attachment.path;
+        const script = `removeImportedPdfComments(${JSON.stringify(ids)}, ${JSON.stringify(fallbackPath)}, ${JSON.stringify(documentId)})`;
+
+        evalScriptSafe(script, ({ success, result, error }) => {
+            const response = success ? parseHostJson(result) : null;
+            if (!response || !response.ok || (response.data && response.data.failed)) {
+                console.warn('Could not remove all imported PDF annotations:', error || (response && response.error) || result);
+                return;
+            }
+
+            removePendingPdfCleanup(code, attachment);
+            attachment.pdfCommentsCleaned = true;
+            AideModels.log('pdf_comments_cleaned', {
+                name: attachment.name,
+                removed: response.data.removed || 0
+            });
+        });
+    }
+
     if (dom.attachBtn) {
         dom.attachBtn.addEventListener('click', () => dom.fileInput.click());
     }
@@ -399,11 +484,48 @@ document.addEventListener('DOMContentLoaded', () => {
                 dom.attachedFileName.textContent = currentAttachment.name;
                 dom.attachedFile.classList.remove('hidden');
                 AideModels.log('attachment', { name: file.name, type: currentAttachment.type, size: file.size });
+
+                importPdfAttachmentComments(currentAttachment);
             } catch (err) {
                 currentAttachment = null;
                 console.error('Failed to read file:', err);
             }
             dom.fileInput.value = '';
+        });
+    }
+
+    // Drag and drop attachment support
+    const chatInputArea = dom.promptInput ? dom.promptInput.closest('.chat-input') : null;
+    if (chatInputArea) {
+        ['dragenter', 'dragover'].forEach(eventName => {
+            chatInputArea.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                chatInputArea.classList.add('drag-over');
+            }, false);
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            chatInputArea.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                chatInputArea.classList.remove('drag-over');
+            }, false);
+        });
+        chatInputArea.addEventListener('drop', async (e) => {
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                try {
+                    currentAttachment = await AideUtils.readTextFile(file);
+                    dom.attachedFileName.textContent = currentAttachment.name;
+                    dom.attachedFile.classList.remove('hidden');
+                    AideModels.log('attachment', { name: file.name, type: currentAttachment.type, size: file.size });
+
+                    importPdfAttachmentComments(currentAttachment);
+                } catch (err) {
+                    currentAttachment = null;
+                    console.error('Failed to read dropped file:', err);
+                }
+            }
         });
     }
 
@@ -607,7 +729,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 dom.promptInput.classList.remove('generating');
 
                 if (update.type === 'done') {
+                    if (attachmentSnapshot && attachmentSnapshot.type === 'pdf') {
+                        if (update.agent) {
+                            // CLI agents edit the live document before reporting done.
+                            cleanupImportedPdfComments(attachmentSnapshot, null);
+                        } else {
+                            // Code providers are not done until their generated script runs.
+                            // Keep the cleanup associated with that exact code for manual or
+                            // automatic execution, and retain it after a failed run for retry.
+                            pendingPdfCleanupByCode.push({
+                                code: AideUtils.stripCodeFences(update.text || ''),
+                                attachment: attachmentSnapshot
+                            });
+                        }
+                    }
+
                     renderChatMessages();
+                    if (!update.agent && attachmentSnapshot && attachmentSnapshot.type === 'pdf') {
+                        const generatedRunBtns = dom.chatMessages.querySelectorAll('.execute-btn');
+                        if (generatedRunBtns.length > 0) {
+                            generatedRunBtns[generatedRunBtns.length - 1]._pdfCleanupAttachment = attachmentSnapshot;
+                        }
+                    }
                     dom.promptInput.value = '';
                     dom.promptInput.style.height = 'auto';
                     persistChatDraft('');
@@ -634,7 +777,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             setTimeout(() => {
                                 const runBtns = dom.chatMessages.querySelectorAll('.execute-btn');
                                 if (runBtns.length > 0) {
-                                    runBtns[runBtns.length - 1].click();
+                                    const runBtn = runBtns[runBtns.length - 1];
+                                    if (attachmentSnapshot && attachmentSnapshot.type === 'pdf') {
+                                        runBtn._pdfCleanupAttachment = attachmentSnapshot;
+                                    }
+                                    runBtn.click();
                                 }
                             }, 50);
                         }
@@ -832,6 +979,7 @@ document.addEventListener('DOMContentLoaded', () => {
         evalScriptSafe(scriptCall, ({ success, result, error }) => {
             const isError = !success;
             const message = success ? result : error;
+            const pdfCleanupAttachment = findPendingPdfCleanup(code, triggerBtn);
             AideChat.logExecution(code, message, isError);
 
             if (triggerBtn) {
@@ -854,7 +1002,9 @@ document.addEventListener('DOMContentLoaded', () => {
             showExecResult(triggerBtn, !isError, message, opts.launcherCard);
 
             if (isError) {
-                offerAutoFix(message, opts.failedCode != null ? opts.failedCode : code);
+                offerAutoFix(message, opts.failedCode != null ? opts.failedCode : code, pdfCleanupAttachment);
+            } else if (pdfCleanupAttachment) {
+                cleanupImportedPdfComments(pdfCleanupAttachment, code);
             }
         });
     }
@@ -957,7 +1107,7 @@ document.addEventListener('DOMContentLoaded', () => {
         dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
     }
 
-    function offerAutoFix(errorMsg, failedCode) {
+    function offerAutoFix(errorMsg, failedCode, pdfCleanupAttachment) {
         const fixDiv = document.createElement('div');
         fixDiv.className = 'chat-msg assistant';
         fixDiv.innerHTML = `
@@ -977,7 +1127,19 @@ document.addEventListener('DOMContentLoaded', () => {
             await AideChat.sendErrorFeedback(errorMsg, (update) => {
                 if (update.type === 'done' || update.type === 'error') {
                     removeTypingIndicator();
+                    if (update.type === 'done' && pdfCleanupAttachment) {
+                        pendingPdfCleanupByCode.push({
+                            code: AideUtils.stripCodeFences(update.text || ''),
+                            attachment: pdfCleanupAttachment
+                        });
+                    }
                     renderChatMessages();
+                    if (update.type === 'done' && pdfCleanupAttachment) {
+                        const fixedRunBtns = dom.chatMessages.querySelectorAll('.execute-btn');
+                        if (fixedRunBtns.length > 0) {
+                            fixedRunBtns[fixedRunBtns.length - 1]._pdfCleanupAttachment = pdfCleanupAttachment;
+                        }
+                    }
                     dom.sendBtn.disabled = false;
                 }
             }, failedCode);

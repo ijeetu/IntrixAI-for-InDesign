@@ -162,18 +162,229 @@ const AideUtils = (() => {
     }
 
     /**
-     * Read a text file and return its contents.
-     * Supports: .csv, .txt, .tsv, .json
+     * Decode PDF string literal or hex string.
+     */
+    function decodePdfString(str) {
+        if (!str) return '';
+        str = str.trim();
+        // Hex string: <48656C6C6F>
+        if (str.startsWith('<') && str.endsWith('>')) {
+            const hex = str.slice(1, -1).replace(/\s+/g, '');
+            let decoded = '';
+            if (hex.length >= 4 && (hex.startsWith('FEFF') || hex.startsWith('feff'))) {
+                for (let i = 4; i < hex.length; i += 4) {
+                    const code = parseInt(hex.substring(i, i + 4), 16);
+                    if (!isNaN(code)) decoded += String.fromCharCode(code);
+                }
+                return decoded;
+            }
+            for (let i = 0; i < hex.length; i += 2) {
+                const code = parseInt(hex.substring(i, i + 2), 16);
+                if (!isNaN(code)) decoded += String.fromCharCode(code);
+            }
+            return decoded;
+        }
+        // Literal string: (text)
+        if (str.startsWith('(') && str.endsWith(')')) {
+            str = str.slice(1, -1);
+        }
+        // UTF-16 BE with BOM (\xFE\xFF)
+        if (str.startsWith('\xFE\xFF') || (str.charCodeAt(0) === 254 && str.charCodeAt(1) === 255)) {
+            let decoded = '';
+            const body = str.slice(2);
+            for (let i = 0; i < body.length; i += 2) {
+                const c1 = body.charCodeAt(i);
+                const c2 = body.charCodeAt(i + 1) || 0;
+                decoded += String.fromCharCode((c1 << 8) | c2);
+            }
+            return decoded;
+        }
+        // Unescape PDF escapes
+        return str
+            .replace(/\\r\\n/g, '\n')
+            .replace(/\\r/g, '\n')
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, '\t')
+            .replace(/\\b/g, '\b')
+            .replace(/\\f/g, '\f')
+            .replace(/\\\(/g, '(')
+            .replace(/\\\)/g, ')')
+            .replace(/\\\\/g, '\\')
+            .replace(/\\([0-7]{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
+    }
+
+    /**
+     * Parse PDF ArrayBuffer to extract comments, annotations, and text content.
+     */
+    function parsePdfCommentsAndText(buffer, fileName) {
+        const bytes = new Uint8Array(buffer);
+        let latin1 = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            latin1 += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+        }
+
+        const comments = [];
+        const objBlocks = latin1.match(/\d+\s+\d+\s+obj[\s\S]*?endobj/g) || [];
+        let count = 0;
+
+        for (let i = 0; i < objBlocks.length; i++) {
+            const block = objBlocks[i];
+            if (block.indexOf('/Subtype') === -1) continue;
+
+            const subtypeMatch = block.match(/\/Subtype\s*\/([A-Za-z0-9]+)/);
+            if (!subtypeMatch) continue;
+
+            const subtype = subtypeMatch[1];
+            const isAnnotSubtype = ['Text', 'Highlight', 'FreeText', 'StrikeOut', 'Underline', 'Squiggly', 'PopUp', 'Square', 'Circle', 'Line', 'Ink', 'Stamp', 'Caret', 'FileAttachment', 'Polygon', 'PolyLine'].indexOf(subtype) !== -1;
+            if (!isAnnotSubtype) continue;
+
+            // Contents / Note
+            let contents = '';
+            const contentsMatch = block.match(/\/Contents\s*(\([^\)]*\)|<[^>]*>)/);
+            if (contentsMatch) {
+                contents = decodePdfString(contentsMatch[1]);
+            }
+
+            // Rich Text (/RC)
+            const rcMatch = block.match(/\/RC\s*(\([^\)]*\)|<[^>]*>)/);
+            let richText = '';
+            if (rcMatch) {
+                const rawRc = decodePdfString(rcMatch[1]);
+                richText = rawRc.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            }
+
+            const finalCommentText = contents || richText;
+
+            // Author (/T)
+            let author = '';
+            const authorMatch = block.match(/\/T\s*(\([^\)]*\)|<[^>]*>)/);
+            if (authorMatch) {
+                author = decodePdfString(authorMatch[1]);
+            }
+
+            // Rect
+            let rect = '';
+            const rectMatch = block.match(/\/Rect\s*\[\s*([\d\.\s-]+)\s*\]/);
+            if (rectMatch) {
+                rect = rectMatch[1].trim().replace(/\s+/g, ', ');
+            }
+
+            // Page
+            let pageNum = '';
+            const pageMatch = block.match(/\/Page\s*(\d+)/);
+            if (pageMatch) {
+                pageNum = pageMatch[1];
+            }
+
+            // Color
+            let color = '';
+            const colorMatch = block.match(/\/C\s*\[\s*([\d\.\s]+)\s*\]/);
+            if (colorMatch) {
+                color = colorMatch[1].trim();
+            }
+
+            if (finalCommentText || subtype === 'Highlight' || subtype === 'StrikeOut' || subtype === 'Underline' || subtype === 'FreeText') {
+                count++;
+                comments.push({
+                    index: count,
+                    subtype: subtype,
+                    author: author || 'Reviewer',
+                    comment: finalCommentText || `[${subtype} markup without explicit text note]`,
+                    rect: rect,
+                    page: pageNum ? `Page ${pageNum}` : 'Page N/A',
+                    color: color
+                });
+            }
+        }
+
+        // Visible page text extraction
+        const pageTextChunks = [];
+        const textStreamRegex = /BT([\s\S]*?)ET/g;
+        let textMatch;
+        while ((textMatch = textStreamRegex.exec(latin1)) !== null) {
+            const streamBlock = textMatch[1];
+            const tjRegex = /\(([^\)]*)\)\s*Tj|\[([^\]]*)\]\s*TJ/g;
+            let tjMatch;
+            let lineText = '';
+            while ((tjMatch = tjRegex.exec(streamBlock)) !== null) {
+                if (tjMatch[1]) {
+                    lineText += decodePdfString('(' + tjMatch[1] + ')');
+                } else if (tjMatch[2]) {
+                    const innerTj = tjMatch[2];
+                    const innerStrRegex = /\(([^\)]*)\)/g;
+                    let innerMatch;
+                    while ((innerMatch = innerStrRegex.exec(innerTj)) !== null) {
+                        lineText += decodePdfString('(' + innerMatch[1] + ')');
+                    }
+                }
+            }
+            if (lineText.trim()) {
+                pageTextChunks.push(lineText.trim());
+            }
+        }
+
+        let summary = `PDF File: ${fileName}\n`;
+        summary += `Total PDF Comments / Annotations Found: ${comments.length}\n\n`;
+
+        if (comments.length > 0) {
+            summary += `═══ DECODED PDF COMMENTS & INSTRUCTIONS ═══\n`;
+            comments.forEach((c) => {
+                summary += `Comment #${c.index}:\n`;
+                summary += `  - Type: ${c.subtype}\n`;
+                summary += `  - Author: ${c.author}\n`;
+                summary += `  - Location: ${c.page} (Coordinates: [${c.rect}])\n`;
+                summary += `  - Instruction / Comment: "${c.comment}"\n\n`;
+            });
+        } else {
+            summary += `No explicit annotation comments found in PDF objects (or scanned image PDF).\n\n`;
+        }
+
+        if (pageTextChunks.length > 0) {
+            summary += `═══ EXTRACTED PDF TEXT PREVIEW ═══\n`;
+            summary += pageTextChunks.slice(0, 100).join('\n') + `\n`;
+        }
+
+        return summary;
+    }
+
+    /**
+     * Read a text or PDF file and return its decoded contents.
+     * Supports: .csv, .txt, .tsv, .json, .pdf
      * @param {File} file
-     * @returns {Promise<{name: string, type: string, content: string}>}
+     * @returns {Promise<{name: string, type: string, path: string, content: string}>}
      */
     function readTextFile(file) {
         return new Promise((resolve, reject) => {
+            const ext = file.name.split('.').pop().toLowerCase();
+            const filePath = file.path || '';
+
+            if (ext === 'pdf') {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const content = parsePdfCommentsAndText(reader.result, file.name);
+                        resolve({
+                            name: file.name,
+                            type: 'pdf',
+                            path: filePath,
+                            content: content
+                        });
+                    } catch (err) {
+                        reject(new Error('Failed to parse PDF file: ' + err.message));
+                    }
+                };
+                reader.onerror = () => reject(new Error('Failed to read PDF file: ' + file.name));
+                reader.readAsArrayBuffer(file);
+                return;
+            }
+
             const reader = new FileReader();
             reader.onload = () => {
                 resolve({
                     name: file.name,
-                    type: file.name.split('.').pop().toLowerCase(),
+                    type: ext,
+                    path: filePath,
                     content: reader.result
                 });
             };
@@ -182,5 +393,5 @@ const AideUtils = (() => {
         });
     }
 
-    return { stripCodeFences, validateSyntax, formatDate, uid, escapeHtml, generateLineNumbersHtml, readTextFile };
+    return { stripCodeFences, validateSyntax, formatDate, uid, escapeHtml, generateLineNumbersHtml, readTextFile, parsePdfCommentsAndText };
 })();
