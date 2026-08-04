@@ -281,3 +281,20 @@ function __processRealTimeMcpDocEdit(targetPageStr, userText) {
         font: devFont
     });
 }
+
+// ── InixAI Unicode Escape Encoder (Playbook Stage 4) ──
+function __toUnicodeEscapedJsx(str) {
+    if (!str) return "";
+    var result = "";
+    for (var i = 0; i < str.length; i++) {
+        var code = str.charCodeAt(i);
+        if (code > 127) {
+            var hex = code.toString(16);
+            while (hex.length < 4) hex = "0" + hex;
+            result += "\\u" + hex;
+        } else {
+            result += str.charAt(i);
+        }
+    }
+    return result;
+}
