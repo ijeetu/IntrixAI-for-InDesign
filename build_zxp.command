@@ -127,7 +127,7 @@ echo "Staging clean copy..."
 STAGE_DIR="dist"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
-cp -R CSXS css js jsx index.html "$STAGE_DIR/"
+cp -R CSXS css js jsx scripts .agent .gemini index.html "$STAGE_DIR/"
 find "$STAGE_DIR" -name ".DS_Store" -delete
 find "$STAGE_DIR" -name "__MACOSX" -exec rm -rf {} + 2>/dev/null || true
 find "$STAGE_DIR" -name "._*" -delete

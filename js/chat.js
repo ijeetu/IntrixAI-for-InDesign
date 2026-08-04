@@ -64,7 +64,8 @@ const AideChat = (() => {
         isGenerating = true;
         _abortController = new AbortController();
         messages.push({ role: 'user', content: userText });
-        onUpdate({ type: 'start' });
+        const isAgentRun = AideModels.isCliProvider();
+        onUpdate({ type: 'start', agent: isAgentRun });
 
         try {
             // Context window management: if conversation is very long,
@@ -73,13 +74,16 @@ const AideChat = (() => {
 
             const responseText = await AideModels.sendChat(messagesToSend, _abortController.signal);
 
-            // Post-process: strip code fences and explanation text
-            const cleanCode = AideUtils.stripCodeFences(responseText);
+            // API providers generate ExtendScript. CLI providers already used MCP
+            // to edit the live document, so their final text is an agent report.
+            const cleanCode = isAgentRun
+                ? String(responseText || '').trim()
+                : AideUtils.stripCodeFences(responseText);
 
             AideModels.log('ai_response', { raw: responseText.substring(0, 500), clean: cleanCode.substring(0, 500) });
 
-            messages.push({ role: 'assistant', content: cleanCode });
-            onUpdate({ type: 'done', text: cleanCode });
+            messages.push({ role: 'assistant', content: cleanCode, mode: isAgentRun ? 'agent' : 'code' });
+            onUpdate({ type: 'done', text: cleanCode, agent: isAgentRun });
         } catch (error) {
             // AbortError means the user stopped generation — treat as a clean cancel, not an error
             if (error.name === 'AbortError') {

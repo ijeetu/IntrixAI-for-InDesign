@@ -9,16 +9,18 @@
 
 # IntrixAI — AI Assistant for Adobe InDesign
 
-**IntrixAI** is an advanced CEP panel that lives inside Adobe InDesign and acts as your AI scripting assistant, MCP engine, and script manager.
+**IntrixAI** is an advanced CEP panel that lives inside Adobe InDesign and acts as a CLI design agent, AI scripting assistant, MCP bridge, and script manager.
 
 Works with **local AI models** (via [Ollama](https://ollama.com)), or cloud providers like **Google Gemini**, **OpenAI**, **Anthropic**, and any **OpenAI-compatible endpoint**.
 
 ## ✨ Features
 
 ### Core
+- **CLI Agent Mode**: Claude Code, Antigravity, Codex, and Gemini inspect, edit, and verify the live InDesign document with native MCP tool calls.
+- **Agent-Owned MCP Lifecycle**: The selected CLI starts the installed InDesign MCP server; the CEP panel attaches to it over localhost WebSocket.
 - **Natural Language → ExtendScript**: Describe your task, get working code instantly.
 - **Multi-Provider Support**: Ollama (local/private), Google Gemini, OpenAI, Anthropic, and Custom endpoints.
-- **Code Preview & Safety**: All generated code is shown before execution; nothing runs without your approval.
+- **Mode-Aware Safety**: CLI agents apply the requested live-document edits directly; API/local code-generation providers keep the existing code preview and Run approval flow.
 - **Conversation Memory**: Context-aware follow-up prompts build on what was already created.
 - **Auto-Fix on Error**: If a script errors, Aide can send the error message back to the AI to generate a fix.
 - **Adaptive UI**: The panel follows InDesign's brightness theme (Light/Dark) automatically.
@@ -54,35 +56,34 @@ Works with **local AI models** (via [Ollama](https://ollama.com)), or cloud prov
 ### Installation (macOS)
 **Option A: Quick Install (Recommended)**
 1. Download this repository.
-2. Double-click `enable_debug_mode.command` to allow unsigned extensions.
-3. Double-click `install_extension.command` (enter your password when prompted).
+2. Double-click `install_extension.command` (enter your password when prompted). This installs the CEP panel to a single user-scoped extension folder, and auto-installs/builds `adobe-indesign-mcp` if it isn't already on disk. It does **not** touch the global CEP `PlayerDebugMode` registry setting — the panel loads unsigned via a scoped `.debug` file instead.
 
 **Option B: Manual Install**
-If you prefer not to use the `.command` scripts:
-1. **Enable Debug Mode**: Open Terminal and run:
+If you prefer not to use the `.command` script:
+1. **Create Extension Folder**:
    ```bash
-   defaults write com.adobe.CSXS.9 PlayerDebugMode 1
-   defaults write com.adobe.CSXS.10 PlayerDebugMode 1
-   defaults write com.adobe.CSXS.11 PlayerDebugMode 1
-   defaults write com.adobe.CSXS.12 PlayerDebugMode 1
+   mkdir -p "$HOME/Library/Application Support/Adobe/CEP/extensions/com.intrixai.indesign"
    ```
-2. **Create Extension Folder**: 
+2. **Copy Files**: Copy `CSXS`, `css`, `js`, `jsx`, `scripts`, `index.html` (and `.agent`/`.gemini` if present) from this repo into the folder created above.
+3. **Fix Permissions**:
    ```bash
-   sudo mkdir -p "/Library/Application Support/Adobe/CEP/extensions/com.aide.indesign"
+   xattr -cr "$HOME/Library/Application Support/Adobe/CEP/extensions/com.intrixai.indesign"
    ```
-3. **Copy Files**: Copy `CSXS`, `css`, `js`, `jsx`, and `index.html` from this repo into the folder created above.
-4. **Fix Permissions**:
-   ```bash
-   sudo xattr -cr "/Library/Application Support/Adobe/CEP/extensions/com.aide.indesign"
-   sudo chmod -R 755 "/Library/Application Support/Adobe/CEP/extensions/com.aide.indesign"
-   ```
+4. **Scope debug loading to this extension only** — add a `.debug` file (see `install_extension.command` for the exact XML) rather than flipping the global `PlayerDebugMode` registry key for every CEP host on the machine.
+5. Restart InDesign and go to **Window → Extensions → IntrixAI**.
 
-5. Restart InDesign and go to **Window → Extensions → Aide**.
+### The InDesign MCP Bridge (CLI Agent Mode)
+CLI agents (Claude Code, Antigravity, Codex, Gemini) never talk to InDesign directly — they call MCP tools on the `indesign-nutria-mcp` server over STDIO. That server relays ExtendScript execution to InDesign over a WebSocket at `ws://127.0.0.1:8120`. **`js/mcp-ws-bridge.js`**, loaded by the IntrixAI CEP panel itself, is what serves that WebSocket connection inside InDesign — no separate plugin or manual "Connect" step is required.
+
+The panel starts trying to connect the moment it loads and keeps retrying every 800ms in the background. The MCP server itself is ephemeral — it's only spawned for the duration of a CLI agent turn — so the bridge indicator normally reads **"MCP: Waiting for agent turn…"** between messages and flips to **"MCP: Bridge connected"** while an agent turn is in flight. That's expected, not an error.
+
+If the indicator instead reads **"MCP: Not installed"**, the InDesign MCP server itself couldn't be found on disk — re-run `install_extension.command`, or set `INDESIGN_MCP_SERVER` to its `dist/index.js` path.
 
 ### Installation (Windows)
-1. Enable Debug Mode: Run `regedit`, go to `HKEY_CURRENT_USER\Software\Adobe\CSXS.10` (or your version), and set `PlayerDebugMode` to `1`.
-2. Copy the folder to: `C:\Users\<User>\AppData\Roaming\Adobe\CEP\extensions\com.aide.indesign`
-3. Restart InDesign and find it under **Window → Extensions**.
+1. Copy this repo's `CSXS`, `css`, `js`, `jsx`, `scripts`, `index.html` into: `C:\Users\<User>\AppData\Roaming\Adobe\CEP\extensions\com.intrixai.indesign`
+2. Scope debug loading to this extension only by adding a `.debug` file at `C:\Users\<User>\AppData\Roaming\Adobe\CEP\extensions\.debug` listing `com.intrixai.indesign.panel` (see `install_extension.command` for the exact XML) — this avoids setting the global `PlayerDebugMode` registry key for every CEP host on the machine.
+3. Restart InDesign and find it under **Window → Extensions → IntrixAI**.
+4. For CLI Agent Mode, make sure the InDesign MCP server is installed (see "The InDesign MCP Bridge" above) — the panel connects to it automatically.
 
 ## 🛠 Project Structure
 
@@ -96,6 +97,8 @@ Aide/
 │   ├── CSInterface.js       # Adobe CEP library (Internal)
 │   ├── app.js               # App logic, theme, & UI wiring
 │   ├── chat.js              # Conversation engine
+│   ├── agent-runtime.js     # Safe CLI process + MCP agent orchestration
+│   ├── mcp-ws-bridge.js     # In-panel WebSocket client for the InDesign MCP bridge
 │   ├── models.js            # AI Provider management
 │   ├── scripts.js           # Library management (Aide, Sets, Favs)
 │   ├── system-prompt.js     # InDesign DOM reference for the AI
@@ -103,6 +106,10 @@ Aide/
 ├── jsx/
 │   └── host.jsx             # ExtendScript executor bridge
 ├── index.html               # Main UI shell
+├── scripts/
+│   └── launch-indesign-mcp.mjs # Portable installed-server discovery/launcher
+├── .agent/plugins/          # Antigravity workspace MCP plugin
+├── .gemini/settings.json    # Gemini project MCP registration
 ├── install_extension.command # macOS installer
 ├── enable_debug_mode.command # macOS debug enabler
 ├── LICENSE
@@ -113,6 +120,7 @@ Aide/
 - **Local-first**: When using Ollama, all processing stays on your machine.
 - **API Security**: Keys are stored locally in your browser's `localStorage` and are never sent to third parties (only to the provider's API).
 - **No Telemetry**: Aide does not collect data or "phone home."
+- **Scoped Agent Runs**: CLI prompts are passed as process arguments/stdin without shell interpolation. Claude is limited to the supplied MCP config, and Codex runs with a read-only filesystem sandbox.
 
 ## 📜 License
 MIT — see [LICENSE](LICENSE) for details.

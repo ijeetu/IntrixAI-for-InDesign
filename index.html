@@ -43,8 +43,8 @@
                             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
                         </svg>
                     </div>
-                    <p class="welcome-title">What would you like to automate?</p>
-                    <p class="welcome-subtitle">Describe your InDesign task in plain language. I'll generate the ExtendScript to do it.</p>
+                    <p class="welcome-title">What would you like to change?</p>
+                    <p class="welcome-subtitle">Describe the result. A CLI agent will inspect and edit the live InDesign document through MCP.</p>
                     <div class="quick-prompts">
                         <button class="quick-prompt-btn" data-prompt="Create a 10-page document with A4 size and 12mm margins">New document</button>
                         <button class="quick-prompt-btn" data-prompt="Add a text frame on page 1 with 'Hello InDesign' in 24pt Arial, centered">Add text</button>
@@ -373,12 +373,13 @@
 
     <script src="js/CSInterface.js"></script>
     <script src="js/utils.js"></script>
+    <script src="js/mcp-ws-bridge.js"></script>
+    <script src="js/agent-runtime.js"></script>
     <script src="js/models.js"></script>
     <script src="js/scripts.js"></script>
     <script src="js/system-prompt-api.js"></script>
     <script src="js/system-prompt.js"></script>
     <script src="js/chat.js"></script>
-    <script src="js/mcp-bridge.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

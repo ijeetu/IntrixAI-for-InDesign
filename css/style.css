@@ -312,45 +312,45 @@ body {
 .cli-process-indicator {
     display: inline-flex;
     align-items: center;
+    align-self: flex-start;
     gap: 8px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--accent);
-    border-radius: 20px;
-    padding: 6px 12px;
-    margin-top: 4px;
-    font-size: 11px;
+    max-width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.5;
     color: var(--text-primary);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .cli-spinner {
-    display: inline-block;
-    font-size: 14px;
-    animation: cliSpin 1.2s linear infinite;
+    width: 12px;
+    height: 12px;
+    flex: 0 0 12px;
+    border: 1.5px solid var(--border-strong);
+    border-top-color: var(--text-primary);
+    border-radius: 50%;
+    animation: cliSpin 0.8s linear infinite;
 }
 
 @keyframes cliSpin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    to { transform: rotate(360deg); }
 }
 
 .cli-process-text {
     font-weight: 500;
-    letter-spacing: 0.2px;
-    color: var(--accent);
+    letter-spacing: -0.08px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.cli-pulse-dot {
-    width: 6px;
-    height: 6px;
-    background-color: var(--success);
-    border-radius: 50%;
-    animation: cliPulse 1s ease-in-out infinite alternate;
-}
-
-@keyframes cliPulse {
-    0% { opacity: 0.3; transform: scale(0.8); }
-    100% { opacity: 1; transform: scale(1.2); }
+@media (prefers-reduced-motion: reduce) {
+    .cli-spinner {
+        animation: none;
+    }
 }
 
 .chat-msg .msg-body {
@@ -365,6 +365,29 @@ body {
 .chat-msg.user .msg-body {
     background: var(--accent-dim);
     border: 1px solid rgba(91,141,239,0.15);
+}
+
+.msg-agent-report {
+    position: relative;
+}
+
+.msg-agent-report .msg-body {
+    border: 1px solid rgba(76, 175, 80, 0.28);
+    padding-top: 24px;
+}
+
+.agent-report-badge {
+    position: absolute;
+    top: 6px;
+    left: 9px;
+    z-index: 1;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(76, 175, 80, 0.16);
+    color: var(--success);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
 }
 
 /* Code block inside assistant messages */

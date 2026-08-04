@@ -47,16 +47,16 @@ const AideModels = (() => {
     // Known models for remote providers
     const REMOTE_MODELS = {
         'claude-cli': [
-            { name: 'Claude Code CLI', desc: 'Local CLI Agent (/Users/jeetuvishwakarma/.local/bin/claude)' }
+            { name: 'Claude Code CLI', desc: 'Local CLI agent with live InDesign MCP tools' }
         ],
         'antigravity-cli': [
-            { name: 'Antigravity CLI (agy)', desc: 'Local CLI Agent (/Users/jeetuvishwakarma/.local/bin/agy)' }
+            { name: 'Antigravity CLI (agy)', desc: 'Local CLI agent with live InDesign MCP tools' }
         ],
         'codex-cli': [
-            { name: 'Codex CLI', desc: 'Local CLI Agent (/opt/homebrew/bin/codex)' }
+            { name: 'Codex CLI', desc: 'Local CLI agent with live InDesign MCP tools' }
         ],
         'gemini-cli': [
-            { name: 'Gemini CLI', desc: 'Local CLI Agent (/opt/homebrew/bin/gemini)' }
+            { name: 'Gemini CLI', desc: 'Local CLI agent with live InDesign MCP tools' }
         ],
         google: [
             { name: 'gemini-2.0-flash', desc: 'Fast, free tier' },
@@ -256,8 +256,8 @@ const AideModels = (() => {
 
     async function testRemoteConnection() {
         try {
-            if (config.provider === 'claude-cli' || config.provider === 'antigravity-cli' || config.provider === 'codex-cli' || config.provider === 'gemini-cli') {
-                return { ok: true, error: null };
+            if (IntrixAgentRuntime.isCliProvider(config.provider)) {
+                return IntrixAgentRuntime.check(config.provider);
             }
             const key = config.apiKeys?.[config.provider] || '';
             if (config.provider === 'google') {
@@ -335,77 +335,6 @@ const AideModels = (() => {
         throw lastError;
     }
 
-    function getNodeRequire() {
-        if (typeof require !== 'undefined') return require;
-        if (typeof window.require !== 'undefined') return window.require;
-        if (typeof window.cep_node !== 'undefined' && window.cep_node.require) return window.cep_node.require;
-        return null;
-    }
-
-    async function sendCliChat(cliType, messages, signal) {
-        const req = getNodeRequire();
-        if (!req) {
-            throw new Error('Node child_process unavailable in CEP context.');
-        }
-        const cp = req('child_process');
-        const fs = req('fs');
-
-        const cliBins = {
-            'claude-cli': ['/Users/jeetuvishwakarma/.local/bin/claude', 'claude'],
-            'antigravity-cli': ['/Users/jeetuvishwakarma/.local/bin/agy', 'agy'],
-            'codex-cli': ['/opt/homebrew/bin/codex', 'codex'],
-            'gemini-cli': ['/opt/homebrew/bin/gemini', 'gemini']
-        };
-
-        const candidates = cliBins[cliType] || ['claude'];
-        let binPath = candidates[0];
-        for (let i = 0; i < candidates.length; i++) {
-            if (fs.existsSync && fs.existsSync(candidates[i])) {
-                binPath = candidates[i];
-                break;
-            }
-        }
-
-        const lastUser = messages.filter(m => m.role === 'user').slice(-1)[0]?.content || '';
-        const fullPrompt = lastUser;
-
-        const tmpFile = `/tmp/aide_cli_prompt_${Date.now()}.txt`;
-        fs.writeFileSync(tmpFile, fullPrompt, 'utf8');
-
-        let cmd = '';
-        if (cliType === 'claude-cli') {
-            cmd = `"${binPath}" -p "$(cat "${tmpFile}")" < /dev/null`;
-        } else if (cliType === 'antigravity-cli') {
-            cmd = `"${binPath}" -p "$(cat "${tmpFile}")" < /dev/null`;
-        } else if (cliType === 'codex-cli') {
-            cmd = `"${binPath}" exec "$(cat "${tmpFile}")" < /dev/null`;
-        } else if (cliType === 'gemini-cli') {
-            cmd = `"${binPath}" -p "$(cat "${tmpFile}")" < /dev/null`;
-        } else {
-            cmd = `"${binPath}" -p "$(cat "${tmpFile}")" < /dev/null`;
-        }
-
-        const userHome = '/Users/jeetuvishwakarma';
-        const userEnv = Object.assign({}, process.env, {
-            HOME: userHome,
-            USER: 'jeetuvishwakarma',
-            PATH: '/Users/jeetuvishwakarma/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
-            SHELL: '/bin/zsh',
-            TERM: 'xterm-256color'
-        });
-
-        return new Promise((resolve, reject) => {
-            cp.exec(cmd, { maxBuffer: 10 * 1024 * 1024, env: userEnv }, (err, stdout, stderr) => {
-                try { fs.unlinkSync(tmpFile); } catch(e) {}
-                const output = (stdout || stderr || '').trim();
-                if (err && !output) {
-                    return reject(new Error(`${cliType} error: ${err.message}`));
-                }
-                resolve(output);
-            });
-        });
-    }
-
     // ──────────── Chat API ────────────
     /**
      * @param {Array}       messages
@@ -420,8 +349,8 @@ const AideModels = (() => {
         });
 
         let response;
-        if (config.provider === 'claude-cli' || config.provider === 'antigravity-cli' || config.provider === 'codex-cli' || config.provider === 'gemini-cli') {
-            response = await sendCliChat(config.provider, messages, signal);
+        if (IntrixAgentRuntime.isCliProvider(config.provider)) {
+            response = await IntrixAgentRuntime.run(config.provider, messages, signal);
         } else if (config.provider === 'ollama') {
             response = await sendOllamaChat(messages, signal);
         } else if (config.provider === 'google') {
@@ -649,6 +578,7 @@ const AideModels = (() => {
         fetchOllamaModels, fetchGoogleModels,
         checkOllamaConnection, testRemoteConnection,
         sendChat,
+        isCliProvider: function () { return IntrixAgentRuntime.isCliProvider(config.provider); },
         log, getDebugLog, clearDebugLog, exportDebugLog
     };
 })();

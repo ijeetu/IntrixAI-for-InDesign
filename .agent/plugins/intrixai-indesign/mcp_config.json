@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "intrixai-indesign": {
+      "command": "node",
+      "args": [
+        "scripts/launch-indesign-mcp.mjs"
+      ]
+    }
+  }
+}

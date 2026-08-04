@@ -314,12 +314,18 @@ document.addEventListener('DOMContentLoaded', () => {
     async function checkConnection() {
         const dot = $id('chat-connection-dot');
         const textArea = $id('chat-model-indicator');
+        const mcpWrap = $id('mcp-indicator-wrap');
+        const mcpDot = $id('mcp-connection-dot');
+        const mcpText = $id('mcp-status-text');
         if (!dot || !textArea) return;
-        
+
         const cfg = AideModels.getConfig();
+        const isCli = AideModels.isCliProvider();
         textArea.textContent = cfg.model || 'No model';
         dot.className = 'connection-dot';
         dot.title = 'Checking connection...';
+
+        if (mcpWrap) mcpWrap.classList.toggle('hidden', !isCli);
 
         let result;
         if (cfg.provider === 'ollama') {
@@ -336,7 +342,21 @@ document.addEventListener('DOMContentLoaded', () => {
             dot.title = result.error || 'Connection Failed';
             textArea.textContent = 'Error';
             if (cfg.provider !== 'ollama') {
-               textArea.textContent = 'Auth Error'; 
+               textArea.textContent = 'Auth Error';
+            }
+        }
+
+        // `result.ok` here only confirms the CLI binary and installed InDesign MCP
+        // server files are present on disk — it says nothing about whether a bridge
+        // is actually connected right now. Live connection state (idle/connecting/
+        // connected) is owned by js/mcp-ws-bridge.js, which keeps the indicator
+        // updated in real time. We only need to override it here for the one state
+        // the bridge module can't detect on its own: the server isn't installed.
+        if (isCli && mcpDot && mcpText) {
+            if (!result.ok) {
+                mcpDot.className = 'connection-dot err';
+                mcpText.textContent = 'MCP: Not installed';
+                if (mcpWrap) mcpWrap.title = result.error || 'InDesign MCP server not found. Run install_extension.command to install it.';
             }
         }
     }
@@ -426,6 +446,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const codeId = 'code-' + idx;
                 const lineNumsHtml = AideUtils.generateLineNumbersHtml(msg.content);
 
+                if (msg.mode === 'agent') {
+                    el.classList.add('agent-report');
+                    el.innerHTML = `
+                        <span class="msg-role">IntrixAI Agent</span>
+                        <div class="msg-agent-report">
+                            <span class="agent-report-badge">MCP</span>
+                            <div class="msg-body">${AideUtils.escapeHtml(msg.content)}</div>
+                        </div>
+                    `;
+                    dom.chatMessages.appendChild(el);
+                    return;
+                }
+
                 // Store original code for undo
                 originalCodeMap[codeId] = msg.content;
 
@@ -494,15 +527,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showTypingIndicator() {
+        const isAgent = AideModels.isCliProvider();
         const el = document.createElement('div');
         el.className = 'chat-msg assistant';
         el.id = 'typing-indicator';
         el.innerHTML = `
             <span class="msg-role">IntrixAI</span>
-            <div class="cli-process-indicator">
-                <span class="cli-spinner">⚙️</span>
-                <span class="cli-process-text">Running CLI Agent &amp; MCP Execution...</span>
-                <span class="cli-pulse-dot"></span>
+            <div class="cli-process-indicator" role="status" aria-live="polite">
+                <span class="cli-spinner" aria-hidden="true"></span>
+                <span class="cli-process-text">${isAgent ? 'Working in InDesign…' : 'Preparing script…'}</span>
             </div>
         `;
         dom.chatMessages.appendChild(el);
@@ -584,8 +617,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         dom.attachedFileName.textContent = '';
                     }
 
-                    // Auto-run if enabled and valid ExtendScript code exists
-                    if (autoRunEnabled && update.text && update.text.trim()) {
+                    // CLI agents have already changed and verified the live document
+                    // through MCP. Auto-run is only for code-generation providers, and
+                    // only runs code the user can see in the message above — no silent
+                    // fallback executes unreviewed ExtendScript.
+                    if (!update.agent && autoRunEnabled && update.text && update.text.trim()) {
                         const cleanedCode = AideUtils.stripCodeFences(update.text);
                         const isCode = cleanedCode && (
                             cleanedCode.indexOf('var ') !== -1 ||
@@ -601,35 +637,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                     runBtns[runBtns.length - 1].click();
                                 }
                             }, 50);
-                        } else {
-                            // If response is text, invoke real-time MCP Document Editor fallback
-                            const lower = userFacingPrompt.toLowerCase();
-                            let targetPg = "1";
-                            if (lower.indexOf("page 2") !== -1 || lower.indexOf("pg 2") !== -1) targetPg = "2";
-                            else if (lower.indexOf("page 3") !== -1 || lower.indexOf("pg 3") !== -1) targetPg = "3";
-                            else if (lower.indexOf("all") !== -1 || lower.indexOf("entire") !== -1) targetPg = "ALL";
-
-                            evalScriptSafe(`__processRealTimeMcpDocEdit('${targetPg}', '${userFacingPrompt.replace(/'/g, "\\'")}')`, ({ success, result }) => {
-                                try {
-                                    const resObj = JSON.parse(result);
-                                    if (resObj && resObj.success) {
-                                        const cardHtml = `<div class="msg-exec-result success">` +
-                                            `✅ <b>Real-Time InDesign Document Edited via MCP!</b><br>` +
-                                            `Target Scope: <b>${resObj.targetScope}</b><br>` +
-                                            `<div class="metric-card" style="margin-top:6px;background:rgba(255,255,255,0.05);padding:8px;border-radius:6px;font-size:11px;">` +
-                                            `  <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Engine:</span><b>CLI + MCP Bridge</b></div>` +
-                                            `  <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Frames Replaced:</span><b>${resObj.framesReplaced} frames</b></div>` +
-                                            `  <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Table Cells:</span><b>${resObj.cellsReplaced} cells</b></div>` +
-                                            `  <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Font Applied:</span><b>${resObj.font}</b></div>` +
-                                            `  <div style="display:flex;justify-content:space-between;"><span>Screen Canvas:</span><b>Redrawn Live</b></div>` +
-                                            `</div></div>`;
-                                        const div = document.createElement('div');
-                                        div.innerHTML = cardHtml;
-                                        dom.chatMessages.appendChild(div);
-                                        dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
-                                    }
-                                } catch(e) {}
-                            });
                         }
                     }
                 } else if (update.type === 'aborted') {
@@ -2214,6 +2221,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ──────────────── Settings Tab ────────────────
     const PROVIDER_HINTS = {
+        'claude-cli': 'Agent mode: Claude Code inspects, edits, and verifies the live InDesign document through MCP.',
+        'antigravity-cli': 'Agent mode: Antigravity discovers the project InDesign MCP plugin and operates on the live document.',
+        'codex-cli': 'Agent mode: Codex receives only the InDesign MCP server and operates in a read-only filesystem sandbox.',
+        'gemini-cli': 'Agent mode: Gemini uses the trusted project InDesign MCP server to edit the live document.',
         ollama: '',
         google: 'Get your key at <a href="#" onclick="openUrl(\'https://aistudio.google.com/apikey\')">Google AI Studio</a>',
         openai: 'Get your key at <a href="#" onclick="openUrl(\'https://platform.openai.com/api-keys\')">platform.openai.com</a>',
@@ -2346,6 +2357,11 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 dom.providerHint.classList.add('hidden');
             }
+        }
+
+        const autoRunWrap = $id('auto-run-wrap');
+        if (autoRunWrap) {
+            autoRunWrap.classList.toggle('hidden', isCli);
         }
     }
 
