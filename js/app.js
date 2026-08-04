@@ -499,8 +499,10 @@ document.addEventListener('DOMContentLoaded', () => {
         el.id = 'typing-indicator';
         el.innerHTML = `
             <span class="msg-role">IntrixAI</span>
-            <div class="typing-indicator">
-                <span></span><span></span><span></span>
+            <div class="cli-process-indicator">
+                <span class="cli-spinner">⚙️</span>
+                <span class="cli-process-text">Running CLI Agent &amp; MCP Execution...</span>
+                <span class="cli-pulse-dot"></span>
             </div>
         `;
         dom.chatMessages.appendChild(el);

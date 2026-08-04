@@ -308,6 +308,51 @@ body {
 .chat-msg.user .msg-role { color: var(--accent); }
 .chat-msg.assistant .msg-role { color: var(--success); }
 
+/* CLI Process Indicator */
+.cli-process-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--accent);
+    border-radius: 20px;
+    padding: 6px 12px;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-primary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.cli-spinner {
+    display: inline-block;
+    font-size: 14px;
+    animation: cliSpin 1.2s linear infinite;
+}
+
+@keyframes cliSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.cli-process-text {
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    color: var(--accent);
+}
+
+.cli-pulse-dot {
+    width: 6px;
+    height: 6px;
+    background-color: var(--success);
+    border-radius: 50%;
+    animation: cliPulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes cliPulse {
+    0% { opacity: 0.3; transform: scale(0.8); }
+    100% { opacity: 1; transform: scale(1.2); }
+}
+
 .chat-msg .msg-body {
     background: var(--bg-secondary);
     border-radius: var(--radius-lg);
