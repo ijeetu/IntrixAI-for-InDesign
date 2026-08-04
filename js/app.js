@@ -109,10 +109,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Light version: compact-only scripts view (no toggle)
     let scriptsViewMode = 'compact';
 
-    const AUTO_RUN_KEY = 'aide_auto_run_enabled';
-    let autoRunEnabled = false;
+    const AUTO_RUN_KEY = 'intrixai_auto_run_enabled';
+    let autoRunEnabled = true;
     try {
-        autoRunEnabled = localStorage.getItem(AUTO_RUN_KEY) === 'true';
+        const savedAutoRun = localStorage.getItem(AUTO_RUN_KEY);
+        if (savedAutoRun !== null) {
+            autoRunEnabled = savedAutoRun === 'true';
+        }
     } catch (e) { /* ignore */ }
 
     // Light version: script descriptions feature removed.
@@ -427,7 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 originalCodeMap[codeId] = msg.content;
 
                 el.innerHTML = `
-                    <span class="msg-role">Aide</span>
+                    <span class="msg-role">IntrixAI</span>
                     ${hasCode ? `
                     <div class="msg-code-block">
                         <div class="msg-code-header">
@@ -495,7 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
         el.className = 'chat-msg assistant';
         el.id = 'typing-indicator';
         el.innerHTML = `
-            <span class="msg-role">Aide</span>
+            <span class="msg-role">IntrixAI</span>
             <div class="typing-indicator">
                 <span></span><span></span><span></span>
             </div>
@@ -579,14 +582,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         dom.attachedFileName.textContent = '';
                     }
 
-                    // Auto-run if enabled and code exists
+                    // Auto-run if enabled and valid ExtendScript code exists
                     if (autoRunEnabled && update.text && update.text.trim()) {
-                        setTimeout(() => {
-                            const runBtns = dom.chatMessages.querySelectorAll('.execute-btn');
-                            if (runBtns.length > 0) {
-                                runBtns[runBtns.length - 1].click();
-                            }
-                        }, 50); // Small delay to ensure DOM is fully ready
+                        const cleanedCode = AideUtils.stripCodeFences(update.text);
+                        const isCode = cleanedCode && (
+                            cleanedCode.indexOf('var ') !== -1 ||
+                            cleanedCode.indexOf('app.') !== -1 ||
+                            cleanedCode.indexOf('doc.') !== -1 ||
+                            cleanedCode.indexOf('try') !== -1 ||
+                            cleanedCode.indexOf('__find') !== -1
+                        );
+                        if (isCode) {
+                            setTimeout(() => {
+                                const runBtns = dom.chatMessages.querySelectorAll('.execute-btn');
+                                if (runBtns.length > 0) {
+                                    runBtns[runBtns.length - 1].click();
+                                }
+                            }, 50); // Small delay to ensure DOM is fully ready
+                        }
                     }
                 } else if (update.type === 'aborted') {
                     // Generation was stopped — leave the prompt intact so the user can retry
@@ -2211,9 +2224,8 @@ document.addEventListener('DOMContentLoaded', () => {
             toggleDebugUI(cfg.debugLogging);
         }
 
-        // Prompt tier (v3.1 — just restore the dropdown)
         if (dom.promptTierSelect) {
-            dom.promptTierSelect.value = localStorage.getItem('aide_prompt_tier') || 'tier_2';
+            dom.promptTierSelect.value = localStorage.getItem('intrixai_prompt_tier') || 'tier_2';
         }
 
         renderLocalFoldersSettings();
@@ -2286,8 +2298,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function toggleProviderUI(provider) {
+        var isCli = (provider === 'claude-cli' || provider === 'antigravity-cli' || provider === 'codex-cli' || provider === 'gemini-cli');
         dom.ollamaHostRow.classList.toggle('hidden', provider !== 'ollama');
-        dom.apiKeyRow.classList.toggle('hidden', provider === 'ollama');
+        dom.apiKeyRow.classList.toggle('hidden', provider === 'ollama' || isCli);
         if (dom.customEndpointRow) {
             dom.customEndpointRow.classList.toggle('hidden', provider !== 'custom');
         }

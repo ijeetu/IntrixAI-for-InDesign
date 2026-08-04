@@ -12,7 +12,7 @@ const AideScripts = (() => {
     const SCRIPTS_SUBTAB_KEY = 'aide_scripts_subtab';
     const SCRIPTS_STAR_FILTER_KEY = 'aide_scripts_star_filter';
     // Light version: compact view only; script descriptions feature removed.
-    const DEFAULT_FOLDER = '~/Documents/Aide Scripts/';
+    const DEFAULT_FOLDER = '~/Documents/IntrixAI Scripts/';
 
     // ──────────────────────────────────────────────
     // CRUD — Aide-saved-from-chat scripts (localStorage)

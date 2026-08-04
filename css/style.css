@@ -565,6 +565,28 @@ body {
     font-family: var(--font-mono);
 }
 
+.connection-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: #888888;
+    display: inline-block;
+    flex-shrink: 0;
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.connection-dot.ok, .connection-dot.ready {
+    background-color: var(--success);
+}
+
+.connection-dot.warn, .connection-dot.connecting {
+    background-color: var(--warning);
+}
+
+.connection-dot.err, .connection-dot.off, .connection-dot.error {
+    background-color: var(--danger);
+}
+
 .auto-run-wrap {
     display: flex;
     align-items: center;

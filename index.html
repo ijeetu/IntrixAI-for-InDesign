@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aide</title>
+    <title>IntrixAI</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -76,6 +76,11 @@
                     <div class="model-indicator-wrap" id="chat-model-indicator-wrap" title="Checking...">
                         <div class="connection-dot" id="chat-connection-dot"></div>
                         <span class="model-indicator" id="chat-model-indicator">Loading...</span>
+                    </div>
+
+                    <div class="model-indicator-wrap" id="mcp-indicator-wrap" title="Checking MCP Server...">
+                        <div class="connection-dot" id="mcp-connection-dot"></div>
+                        <span class="model-indicator" id="mcp-status-text">MCP: Connecting...</span>
                     </div>
 
                     <div class="auto-run-wrap" id="auto-run-wrap" title="Automatically run scripts when generated">
@@ -163,10 +168,14 @@
                     <div class="setting-row">
                         <label for="provider-select">Source</label>
                         <select id="provider-select">
+                            <option value="claude-cli">🤖 Claude CLI (Claude Code)</option>
+                            <option value="antigravity-cli">🚀 Antigravity CLI (agy)</option>
+                            <option value="codex-cli">⚡ Codex CLI</option>
+                            <option value="gemini-cli">♊ Gemini CLI</option>
                             <option value="ollama">Ollama (Local)</option>
-                            <option value="google">Google Gemini</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="anthropic">Anthropic</option>
+                            <option value="google">Google Gemini API</option>
+                            <option value="openai">OpenAI API</option>
+                            <option value="anthropic">Anthropic API</option>
                             <option value="openrouter">OpenRouter</option>
                             <option value="custom">Custom API</option>
                         </select>
@@ -255,19 +264,7 @@
                             <p class="setting-hint">Controls randomness of AI responses. Lower = more precise code. Higher = more creative. Applies to all providers. Recommended: 0.1–0.3 for code generation.</p>
                         </fieldset>
 
-                        <!-- Prompt Tier -->
-                        <fieldset class="settings-group">
-                            <legend>Prompt Tier</legend>
-                            <div class="setting-row">
-                                <label for="prompt-tier-select">System prompt</label>
-                                <select id="prompt-tier-select">
-                                    <option value="tier_1">Safe — core rules only (~800 tokens)</option>
-                                    <option value="tier_2" selected>Standard — full reference (~3400 tokens)</option>
-                                    <option value="tier_3">Expert — Standard + API reference (~56K tokens)</option>
-                                </select>
-                            </div>
-                            <p class="setting-hint">Safe: ES3 rules + core patterns. Standard: example-driven with all modules (default). Expert: appends a 43-class API reference for maximum accuracy — requires a large context model.</p>
-                        </fieldset>
+
 
                         <!-- Debug logging -->
                         <fieldset class="settings-group">
@@ -381,6 +378,7 @@
     <script src="js/system-prompt-api.js"></script>
     <script src="js/system-prompt.js"></script>
     <script src="js/chat.js"></script>
+    <script src="js/mcp-bridge.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

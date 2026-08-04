@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest ExtensionBundleId="com.aide.indesign" ExtensionBundleVersion="1.0.0"
-                   ExtensionBundleName="Aide for InDesign" Version="8.0"
+<ExtensionManifest ExtensionBundleId="com.intrixai.indesign" ExtensionBundleVersion="1.0.0"
+                   ExtensionBundleName="IntrixAI for InDesign" Version="10.0"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
     <ExtensionList>
-        <Extension Id="com.aide.indesign.panel" Version="1.0.0" />
+        <Extension Id="com.intrixai.indesign.panel" Version="1.0.0" />
     </ExtensionList>
     <ExecutionEnvironment>
         <HostList>
-            <Host Name="IDSN" Version="15.0" />
+            <Host Name="IDSN" Version="[15.0,99.9]" />
         </HostList>
         <LocaleList>
             <Locale Code="All" />
         </LocaleList>
         <RequiredRuntimeList>
-            <RequiredRuntime Name="CSXS" Version="9.0" />
+            <RequiredRuntime Name="CSXS" Version="10.0" />
         </RequiredRuntimeList>
     </ExecutionEnvironment>
     <DispatchInfoList>
-        <Extension Id="com.aide.indesign.panel">
+        <Extension Id="com.intrixai.indesign.panel">
             <DispatchInfo>
                 <Resources>
                     <MainPath>./index.html</MainPath>
@@ -38,7 +38,7 @@
                 </Lifecycle>
                 <UI>
                     <Type>Panel</Type>
-                    <Menu>Aide</Menu>
+                    <Menu>IntrixAI</Menu>
                     <Geometry>
                         <Size>
                             <Height>600</Height>

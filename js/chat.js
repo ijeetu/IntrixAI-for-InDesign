@@ -33,9 +33,7 @@ const AideChat = (() => {
      * Start a fresh conversation
      */
     function newConversation() {
-        messages = [
-            { role: 'system', content: _resolveBasePrompt() }
-        ];
+        messages = [];
         isGenerating = false;
     }
 
@@ -113,30 +111,7 @@ const AideChat = (() => {
      * Context window management trims old messages when conversation grows too long.
      */
     function getContextManagedMessages() {
-        const systemMsg = messages[0]; // Always the system prompt
-        const conversationMsgs = messages.slice(1);
-
-        const allMsgs = [systemMsg, ...conversationMsgs];
-        const totalChars = allMsgs.reduce((t, m) => t + m.content.length, 0);
-        const estimatedTokens = totalChars / 4;
-
-        // If under 64000 tokens, send everything
-        if (estimatedTokens < 64000) {
-            return allMsgs;
-        }
-
-        // Otherwise, keep system prompt + last N message pairs
-        // Always keep at least the last 6 exchanges (12 messages)
-        const maxConvMessages = 12;
-        const recentMsgs = conversationMsgs.slice(-maxConvMessages);
-
-        // Add a context note so the model knows history was trimmed
-        const contextNote = {
-            role: 'user',
-            content: '[Note: Earlier messages trimmed. Recent messages follow.]'
-        };
-
-        return [systemMsg, contextNote, ...recentMsgs];
+        return messages;
     }
 
     /**

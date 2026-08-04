@@ -7,9 +7,9 @@
   <a href="https://buymeacoffee.com/kostiskounadis" target="_blank"><img src="https://img.shields.io/badge/Buy_Me_A_Beer-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy me a beer"></a>
 </p>
 
-# Aide — AI Assistant for Adobe InDesign
+# IntrixAI — AI Assistant for Adobe InDesign
 
-**Aide** is a CEP panel that lives inside Adobe InDesign and acts as your AI scripting assistant and script manager. Describe what you want in plain English — Aide generates the ExtendScript code, previews it, and lets you execute it with one click. Save your scripts, organize them into sets, star your favorites, and easily run them from a compact library.
+**IntrixAI** is an advanced CEP panel that lives inside Adobe InDesign and acts as your AI scripting assistant, MCP engine, and script manager.
 
 Works with **local AI models** (via [Ollama](https://ollama.com)), or cloud providers like **Google Gemini**, **OpenAI**, **Anthropic**, and any **OpenAI-compatible endpoint**.
 

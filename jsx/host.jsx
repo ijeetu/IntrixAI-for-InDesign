@@ -4,6 +4,8 @@
  *              within an undo group for safe rollback.
  *              Also provides file I/O for script export.
  */
+#include "mcp_helpers.jsx"
+
 
 /**
  * Auto-detect the InDesign Scripts Panel folder for the running version.
