@@ -367,7 +367,7 @@ const AideModels = (() => {
         }
 
         const lastUser = messages.filter(m => m.role === 'user').slice(-1)[0]?.content || '';
-        const fullPrompt = `USER REQUEST: ${lastUser}\n\nCONTEXT: You are operating inside Adobe InDesign. Generate complete, executable Adobe InDesign ExtendScript (ES3, var only, try/catch) using adobe-indesign-mcp helpers (__findDocument, __findPage, __collectTextFrames, __collectShapes, etc.) to perform the requested action. Enclose your ExtendScript code in a \`\`\`javascript ... \`\`\` code block.`;
+        const fullPrompt = lastUser;
 
         const tmpFile = `/tmp/aide_cli_prompt_${Date.now()}.txt`;
         fs.writeFileSync(tmpFile, fullPrompt, 'utf8');
