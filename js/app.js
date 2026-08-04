@@ -598,7 +598,36 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (runBtns.length > 0) {
                                     runBtns[runBtns.length - 1].click();
                                 }
-                            }, 50); // Small delay to ensure DOM is fully ready
+                            }, 50);
+                        } else {
+                            // If response is text, invoke real-time MCP Document Editor fallback
+                            const lower = userFacingPrompt.toLowerCase();
+                            let targetPg = "1";
+                            if (lower.indexOf("page 2") !== -1 || lower.indexOf("pg 2") !== -1) targetPg = "2";
+                            else if (lower.indexOf("page 3") !== -1 || lower.indexOf("pg 3") !== -1) targetPg = "3";
+                            else if (lower.indexOf("all") !== -1 || lower.indexOf("entire") !== -1) targetPg = "ALL";
+
+                            evalScriptSafe(`__processRealTimeMcpDocEdit('${targetPg}', '${userFacingPrompt.replace(/'/g, "\\'")}')`, ({ success, result }) => {
+                                try {
+                                    const resObj = JSON.parse(result);
+                                    if (resObj && resObj.success) {
+                                        const cardHtml = `<div class="msg-exec-result success">` +
+                                            `✅ <b>Real-Time InDesign Document Edited via MCP!</b><br>` +
+                                            `Target Scope: <b>${resObj.targetScope}</b><br>` +
+                                            `<div class="metric-card" style="margin-top:6px;background:rgba(255,255,255,0.05);padding:8px;border-radius:6px;font-size:11px;">` +
+                                            `  <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Engine:</span><b>CLI + MCP Bridge</b></div>` +
+                                            `  <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Frames Replaced:</span><b>${resObj.framesReplaced} frames</b></div>` +
+                                            `  <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Table Cells:</span><b>${resObj.cellsReplaced} cells</b></div>` +
+                                            `  <div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span>Font Applied:</span><b>${resObj.font}</b></div>` +
+                                            `  <div style="display:flex;justify-content:space-between;"><span>Screen Canvas:</span><b>Redrawn Live</b></div>` +
+                                            `</div></div>`;
+                                        const div = document.createElement('div');
+                                        div.innerHTML = cardHtml;
+                                        dom.chatMessages.appendChild(div);
+                                        dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+                                    }
+                                } catch(e) {}
+                            });
                         }
                     }
                 } else if (update.type === 'aborted') {
