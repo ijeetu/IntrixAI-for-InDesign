@@ -50,6 +50,34 @@ else
     echo "✓ InDesign MCP server is already installed."
 fi
 
+if [ -d "$MCP_DIR" ] && [ ! -f "$MCP_DIR/indesign-nutria-mcp.json" ]; then
+    cat > "$MCP_DIR/indesign-nutria-mcp.json" << 'EOF'
+{
+  "bridge": {
+    "port": 8120,
+    "host": "127.0.0.1",
+    "maxPayload": 1048576,
+    "timeout": 30000
+  },
+  "httpBridge": {
+    "enabled": false,
+    "port": 18999,
+    "host": "127.0.0.1",
+    "token": ""
+  },
+  "server": {
+    "transport": "websocket",
+    "name": "indesign-nutria-mcp",
+    "version": "1.0.0"
+  },
+  "logging": {
+    "level": "info"
+  }
+}
+EOF
+    echo "✓ WebSocket configuration created."
+fi
+
 # --- Step 3: Install one canonical user-scoped CEP extension ---
 echo ""
 echo "Installing IntrixAI extension..."

@@ -12,65 +12,14 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { findServer, findConfig, isServerFile } from './mcp-locate.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const EXTENSION_ROOT = path.join(__dirname, '..');
 
 if (Number(process.versions.node.split('.')[0]) < 18) {
     process.stderr.write('[IntrixAI MCP] Node.js 18 or newer is required.\n');
     process.exit(1);
-}
-
-function isServerFile(filePath) {
-    if (!filePath) return false;
-    try {
-        return fs.statSync(filePath).isFile();
-    } catch (e) {
-        return false;
-    }
-}
-
-function findServer() {
-    const userHome = os.homedir();
-    const candidates = [
-        process.env.INDESIGN_MCP_SERVER,
-        path.join(__dirname, '..', 'vendor', 'adobe-indesign-mcp', 'dist', 'index.js'),
-        path.join(__dirname, '..', 'adobe-indesign-mcp', 'dist', 'index.js'),
-        path.join(userHome, 'Library', 'Application Support', 'IntrixAI', 'adobe-indesign-mcp', 'dist', 'index.js'),
-        path.join(userHome, 'Desktop', 'Report', 'adobe-indesign-mcp', 'dist', 'index.js'),
-        path.join(userHome, 'Codes', 'adobe-indesign-mcp', 'dist', 'index.js'),
-        path.join(userHome, 'adobe-indesign-mcp', 'dist', 'index.js')
-    ];
-
-    for (let i = 0; i < candidates.length; i += 1) {
-        if (isServerFile(candidates[i])) return path.resolve(candidates[i]);
-    }
-
-    throw new Error(
-        'InDesign MCP server not found. Set INDESIGN_MCP_SERVER to its dist/index.js path.'
-    );
-}
-
-function findConfig(serverFile) {
-    const packageRoot = path.dirname(path.dirname(serverFile));
-    const candidates = [
-        process.env.INDESIGN_MCP_CONFIG,
-        path.join(packageRoot, 'indesign-nutria-mcp.json'),
-        path.join(packageRoot, 'opencode-indesign.json')
-    ];
-
-    for (let i = 0; i < candidates.length; i += 1) {
-        if (!isServerFile(candidates[i])) continue;
-        const resolved = path.resolve(candidates[i]);
-        try {
-            const config = JSON.parse(fs.readFileSync(resolved, 'utf8'));
-            if (config.server && config.server.transport === 'websocket') return resolved;
-        } catch (e) { /* try the next candidate */ }
-    }
-
-    throw new Error(
-        'InDesign MCP WebSocket config not found beside the server. ' +
-        'Set INDESIGN_MCP_CONFIG to a config whose server.transport is "websocket".'
-    );
 }
 
 function readBridgePort(configFile) {
@@ -132,7 +81,7 @@ async function main() {
     let configFile;
 
     try {
-        serverFile = findServer();
+        serverFile = findServer(EXTENSION_ROOT);
         configFile = findConfig(serverFile);
     } catch (error) {
         process.stderr.write('[IntrixAI MCP] ' + error.message + '\n');

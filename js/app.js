@@ -450,10 +450,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const ids = attachment.importedPdfCommentIds || [];
         const documentId = attachment.pdfCommentDocumentId == null ? null : attachment.pdfCommentDocumentId;
-        // Once an import result is available, even an empty ID list is
-        // authoritative. Supplying no fallback path in that case prevents an
-        // older comment from the same PDF from being deleted accidentally.
-        const fallbackPath = Array.isArray(attachment.importedPdfCommentIds) ? '' : attachment.path;
+        const fallbackPath = attachment.path || '';
         const script = `removeImportedPdfComments(${JSON.stringify(ids)}, ${JSON.stringify(fallbackPath)}, ${JSON.stringify(documentId)})`;
 
         evalScriptSafe(script, ({ success, result, error }) => {
@@ -482,7 +479,7 @@ document.addEventListener('DOMContentLoaded', () => {
         activePdfCleanupAttachment = attachment;
         const ids = attachment.importedPdfCommentIds || [];
         const documentId = attachment.pdfCommentDocumentId == null ? null : attachment.pdfCommentDocumentId;
-        const fallbackPath = Array.isArray(attachment.importedPdfCommentIds) ? '' : attachment.path;
+        const fallbackPath = attachment.path || '';
         const script = `markPdfCommentsResolved(${JSON.stringify(ids)}, ${JSON.stringify(fallbackPath)}, ${JSON.stringify(documentId)})`;
 
         evalScriptSafe(script, ({ success, result, error }) => {
@@ -498,6 +495,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
         });
+    }
+
+    function removeCurrentAttachment() {
+        if (currentAttachment) {
+            if (currentAttachment.type === 'pdf' || (currentAttachment.importedPdfCommentIds && currentAttachment.importedPdfCommentIds.length > 0) || currentAttachment.pdfCommentImportPending) {
+                cleanupImportedPdfComments(currentAttachment, null);
+            }
+            currentAttachment = null;
+        }
+        if (dom.attachedFile) {
+            dom.attachedFile.classList.add('hidden');
+        }
+        if (dom.attachedFileName) {
+            dom.attachedFileName.textContent = '';
+        }
     }
 
     if (dom.clearHighlightsBtn) {
@@ -518,6 +530,9 @@ document.addEventListener('DOMContentLoaded', () => {
         dom.fileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
+            if (currentAttachment) {
+                removeCurrentAttachment();
+            }
             try {
                 currentAttachment = await AideUtils.readTextFile(file);
                 dom.attachedFileName.textContent = currentAttachment.name;
@@ -553,6 +568,9 @@ document.addEventListener('DOMContentLoaded', () => {
         chatInputArea.addEventListener('drop', async (e) => {
             if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
                 const file = e.dataTransfer.files[0];
+                if (currentAttachment) {
+                    removeCurrentAttachment();
+                }
                 try {
                     currentAttachment = await AideUtils.readTextFile(file);
                     dom.attachedFileName.textContent = currentAttachment.name;
@@ -570,9 +588,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (dom.removeAttachment) {
         dom.removeAttachment.addEventListener('click', () => {
-            currentAttachment = null;
-            dom.attachedFile.classList.add('hidden');
-            dom.attachedFileName.textContent = '';
+            removeCurrentAttachment();
         });
     }
 
@@ -580,6 +596,74 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Track original code for undo feature
     const originalCodeMap = {};
+
+    function parseUserAttachedContent(content) {
+        if (!content) return { isAttached: false, userText: '' };
+        
+        const attachMatch = content.match(/^\[Attached file:\s*([^\]]+)\]/i);
+        if (!attachMatch) {
+            return { isAttached: false, userText: content };
+        }
+
+        const fileName = attachMatch[1].trim();
+        let bodyPart = content.substring(attachMatch[0].length).trim();
+
+        let fileContents = '';
+        let userText = '';
+
+        // Flexible split on "--- User request:" regardless of surrounding spaces or newlines
+        const reqSplit = bodyPart.split(/\s*---\s*User request:\s*/i);
+        if (reqSplit.length > 1) {
+            userText = reqSplit.slice(1).join(' --- User request: ').trim();
+            let fc = reqSplit[0].trim();
+            if (fc.toLowerCase().startsWith('file contents:')) {
+                fileContents = fc.substring('file contents:'.length).trim();
+            } else {
+                fileContents = fc;
+            }
+        } else {
+            userText = bodyPart;
+        }
+
+        return {
+            isAttached: true,
+            fileName: fileName,
+            fileContents: fileContents,
+            userText: userText
+        };
+    }
+
+    function renderUserMessageBody(content) {
+        if (!content) return '<div class="msg-body"></div>';
+        
+        const parsed = parseUserAttachedContent(content);
+        if (parsed.isAttached) {
+            let detailsHtml = '';
+            if (parsed.fileContents && parsed.fileContents.trim()) {
+                const mdDetails = AideUtils.renderMarkdown(parsed.fileContents);
+                detailsHtml = `
+                    <details class="user-attached-details">
+                        <summary class="user-attached-summary">
+                            <span>📋 Attachment Details & Instructions</span>
+                        </summary>
+                        <div class="user-attached-content md-rendered">
+                            ${mdDetails}
+                        </div>
+                    </details>
+                `;
+            }
+            const userMsgHtml = parsed.userText ? AideUtils.renderMarkdown(parsed.userText) : '';
+            return `
+                <div class="user-attached-badge" title="${AideUtils.escapeHtml(parsed.fileName)}">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                    <span class="user-attached-name">${AideUtils.escapeHtml(parsed.fileName)}</span>
+                </div>
+                ${detailsHtml}
+                ${userMsgHtml ? `<div class="msg-body">${userMsgHtml}</div>` : ''}
+            `;
+        }
+        return `<div class="msg-body">${AideUtils.renderMarkdown(content)}</div>`;
+    }
 
     function renderChatMessages() {
         const msgs = AideChat.getMessages();
@@ -600,7 +684,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (msg.role === 'user') {
                 el.innerHTML = `
                     <span class="msg-role">You</span>
-                    <div class="msg-body">${AideUtils.escapeHtml(msg.content)}</div>
+                    ${renderUserMessageBody(msg.content)}
                 `;
             } else if (msg.role === 'assistant') {
                 const hasCode = msg.content.trim().length > 0;
@@ -613,7 +697,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="msg-role">IntrixAI Agent</span>
                         <div class="msg-agent-report">
                             <span class="agent-report-badge">MCP</span>
-                            <div class="msg-body">${AideUtils.escapeHtml(msg.content)}</div>
+                            <div class="msg-body">${AideUtils.renderMarkdown(msg.content)}</div>
                         </div>
                     `;
                     dom.chatMessages.appendChild(el);
@@ -641,7 +725,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <pre class="msg-code-pre" id="${codeId}" contenteditable="true" spellcheck="false" autocomplete="off">${AideUtils.escapeHtml(msg.content)}</pre>
                         </div>
                     </div>
-                    ` : `<div class="msg-body">${AideUtils.escapeHtml(msg.content)}</div>`}
+                    ` : `<div class="msg-body">${AideUtils.renderMarkdown(msg.content)}</div>`}
                 `;
             }
             dom.chatMessages.appendChild(el);
@@ -755,7 +839,7 @@ document.addEventListener('DOMContentLoaded', () => {
         userDiv.className = 'chat-msg user';
         userDiv.innerHTML = `
             <span class="msg-role">You</span>
-            <div class="msg-body">${AideUtils.escapeHtml(text)}</div>
+            ${renderUserMessageBody(text)}
         `;
         dom.chatMessages.appendChild(userDiv);
         showTypingIndicator();

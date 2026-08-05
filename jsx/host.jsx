@@ -460,20 +460,28 @@ function importPdfCommentsToActiveDoc(pdfPathStr) {
         if (doc.pdfComments && doc.pdfComments.length > 0) {
             var totalCount = doc.pdfComments.length;
             for (i = 0; i < totalCount; i++) {
-                var c = doc.pdfComments[i];
-                var commentId = '';
-                try { commentId = String(c.id); } catch (eId) { /* ignore */ }
-                if (commentId && !existingCommentIds[commentId]) {
-                    importedCommentIds.push(Number(commentId));
-                    count++;
-                    commentList.push({
-                        id: Number(commentId),
-                        commentType: c.commentType ? String(c.commentType) : '',
-                        commentText: c.commentContent ? String(c.commentContent) : '',
-                        author: c.commentReviewer ? String(c.commentReviewer) : '',
-                        status: c.commentStatus ? String(c.commentStatus) : ''
-                    });
-                }
+                    var commentId = '';
+                    try { commentId = String(c.id); } catch (eId) { /* ignore */ }
+                    if (commentId && !existingCommentIds[commentId]) {
+                        importedCommentIds.push(Number(commentId));
+                        count++;
+                        var pageName = '';
+                        try { pageName = c.page ? String(c.page.name) : (c.pageNumber ? String(c.pageNumber) : ''); } catch (ePg) {}
+                        var replacingText = '';
+                        try { replacingText = c.replacingText ? String(c.replacingText) : ''; } catch (eRep) {}
+                        if (!replacingText) {
+                            try { if (c.textRange) replacingText = String(c.textRange.contents || ''); } catch (eTr) {}
+                        }
+                        commentList.push({
+                            id: Number(commentId),
+                            commentType: c.commentType ? String(c.commentType) : '',
+                            commentText: c.commentContent ? String(c.commentContent) : '',
+                            replacingText: replacingText,
+                            page: pageName,
+                            author: c.commentReviewer ? String(c.commentReviewer) : '',
+                            status: c.commentStatus ? String(c.commentStatus) : ''
+                        });
+                    }
             }
         }
         return __ok({
@@ -613,14 +621,17 @@ function removeImportedPdfComments(commentIds, pdfPathStr, documentId) {
                 var shouldRemove = false;
                 if (hasIds) {
                     try { shouldRemove = !!idLookup[String(comment.id)]; } catch (eCommentId) { /* ignore */ }
-                } else if (expectedPath) {
+                }
+                if (!shouldRemove && expectedPath) {
                     var commentPath = '';
                     try {
                         commentPath = String(new File(String(comment.commentFilePath || '')).fsName).toLowerCase();
                     } catch (eCommentPath) {
                         try { commentPath = String(comment.commentFilePath || '').toLowerCase(); } catch (eRawPath) { /* ignore */ }
                     }
-                    shouldRemove = commentPath === expectedPath;
+                    if (commentPath && commentPath === expectedPath) {
+                        shouldRemove = true;
+                    }
                 }
 
                 if (shouldRemove) {
