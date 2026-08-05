@@ -854,8 +854,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (update.type === 'done') {
                     if (attachmentSnapshot && attachmentSnapshot.type === 'pdf') {
                         if (update.agent) {
-                            // CLI agents mark comments as resolved (turning highlights GREEN)
-                            markImportedPdfCommentsResolved(attachmentSnapshot);
+                            // Retain PDF attachment for cross-checking; reveal Clear Highlights button
+                            activePdfCleanupAttachment = attachmentSnapshot;
+                            if (dom.clearHighlightsBtn) {
+                                dom.clearHighlightsBtn.classList.remove('hidden');
+                            }
                         } else {
                             // Code providers are not done until their generated script runs.
                             // Keep the cleanup associated with that exact code for manual or
@@ -1122,12 +1125,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 }, 2000);
             }
 
-            showExecResult(triggerBtn, !isError, message, opts.launcherCard);
-
             if (isError) {
                 offerAutoFix(message, opts.failedCode != null ? opts.failedCode : code, pdfCleanupAttachment);
             } else if (pdfCleanupAttachment) {
-                markImportedPdfCommentsResolved(pdfCleanupAttachment);
+                activePdfCleanupAttachment = pdfCleanupAttachment;
+                if (dom.clearHighlightsBtn) {
+                    dom.clearHighlightsBtn.classList.remove('hidden');
+                }
             }
         });
     }
